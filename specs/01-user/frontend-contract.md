@@ -26,6 +26,7 @@ This document states the **browser behavior** the React frontend must follow to 
 ## 3. Submitting the Google credential  [Approved (conditional)]
 - The page posts the Google credential and the raw binder to `POST /api/v1/auth/google` over HTTPS.
 - Any failure is shown as a generic sign-in failure. The page does not interpret the reason, and does not retry automatically.
+- `409 AUTH_IDENTITY_CONFLICT`: shown as a non-retryable message that this Google account cannot be used for sign-in and that the customer should contact support, with no automatic retry. The support path is a **manual, owner-handled procedure that must be defined before production** (Step 5d).
 - On success the page receives the access token, its lifetime, the **CSRF token** (once), and the customer's profile. The refresh token arrives as a cookie the page cannot read.
 
 ## 4. Access token  [Approved: memory only]
@@ -62,7 +63,7 @@ Within one tab, at most one refresh is in flight. Callers that need a token whil
 | `429 RATE_LIMITED` | Honor `Retry-After`; no tight loop |
 | `503 SERVICE_UNAVAILABLE` | Show a generic message; no automatic retry of refresh |
 - Each original request is replayed **at most once**. There is no retry loop anywhere.
-- If the API later distinguishes an expired token (API-DEC-005, open), the page treats any `401` on a protected request the same way.
+- The API distinguishes an expired token with `AUTH_ACCESS_TOKEN_EXPIRED` (API-DEC-005, approved under delegation). The page still treats any `401` on a protected request the same way: one refresh, one replay.
 
 ## 10. Logout  [Approved: decisions 011, 012]
 - The page calls `POST /api/v1/auth/logout` with credentials, `X-CSRF-Protection`, and a JSON content type.

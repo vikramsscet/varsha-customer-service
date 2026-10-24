@@ -60,9 +60,10 @@ No other entities are proposed. Considered and excluded: a login-history table, 
 | Field (logical) | Meaning | Type (logical) | Nullability | Label |
 |---|---|---|---|---|
 | Customer identifier | Internal, stable identity. Immutable, unique, never reused. | Opaque unique identifier | Required | **[Required]** existence/properties (USER-FR-040). Format **[Unresolved]**; a randomly generated UUID is **[Proposed]** (non-guessable, safe to expose in tokens and responses). |
-| Google account identifier | Stable Google subject identifier from validated Google identity information. | Text, case-sensitive, immutable | Required | **[Required]** (USER-FR-005, 041). Maximum length to be verified against Google's documented limit at physical design. |
-| Name | Customer's display name from Google. | Text | Nullable | **[Proposed]** (see 4.4) |
-| Email | Customer's email from Google. | Text | Required | **[Proposed]** required (see 4.4) |
+| Identity provider | The provider that authenticated the customer; `google` in the first release | Text | Required | **[Approved]** (Step 5c; USER-DEC-009 limits the first release to Google) |
+| Provider subject | Stable Google subject identifier from validated Google identity information; the external identity key | Text, case-sensitive, immutable | Required | **[Required]** (USER-FR-005, 041). Maximum length to be verified against Google's documented limit at physical design. |
+| Name | Customer's display name from Google | Text | Nullable | **[Approved]** (Step 5c): NULL when Google provides no usable name (empty after trimming); never invented; returned as `"name": null` (§15.3) |
+| Email | Customer's email from Google, stored only after the Google ID token and its verified-email claim are validated | Text, stored exactly as Google supplies it | Required | **[Approved]** (Step 5c): required; unique case-insensitively as a data-integrity rule, never an identity key (§15.4) |
 | Created timestamp | When the customer was first created. | Timestamp with time zone (UTC) | Required | **[Proposed]** |
 | Updated timestamp | When name or email last changed. | Timestamp with time zone (UTC) | Required | **[Proposed]** (needed because name/email can change; see 4.3) |
 
@@ -74,9 +75,9 @@ Shipping addresses and phone numbers needed for delivery belong to Checkout/Deli
 | Constraint | Label |
 |---|---|
 | Customer identifier is unique. | **[Required]** (USER-FR-040) |
-| Google account identifier is unique across customers (one customer per Google account). | **[Required]** (USER-FR-009, 010) |
+| The pair (identity provider, provider subject) is unique across customers (one customer per Google account) | **[Required]** (USER-FR-009, 010); pair form **[Approved]** (Step 5c) |
 | Email is **not** a unique identity key. | **[Required]** (USER-FR-005, 047) |
-| Whether email additionally carries a uniqueness constraint (as a data-integrity rule, not an identity key). | **[Unresolved]** — USER-DM-DEC-002 |
+| Email is unique **case-insensitively** as a data-integrity rule, **not** as an identity key; no automatic account merging | **[Approved]** (Step 5c; USER-DM-DEC-002; implications in §15.4) |
 
 ### 4.3 Email and name changes
 - **[Required]** A change in Google name or email MUST NOT create a new customer (USER-FR-046). Identity is the Google account identifier.
@@ -105,7 +106,7 @@ The proposed email constraint and the API's response guarantees must be consiste
 | Customer identifier (`id`) | Yes | **[Required]** (API contract proposed response; USER-FR-042) |
 | Name (`name`) | Yes | Per API contract; nullability **[Unresolved]** |
 | Email (`email`) | Yes | Per API contract |
-| Google account identifier | **No** | **[Proposed]** — API contract states it is not returned; no approved need |
+| Provider subject | **No** | **[Proposed]**: API contract states it is not returned; no approved need |
 | Created / updated timestamps | Not returned | **[Proposed]**; the API contract does not include them |
 
 ## 5. Refresh Session and Refresh Token Entities
@@ -212,7 +213,7 @@ Records occurrences that the requirements say must be recorded or reviewed.
 | Token references Session by a foreign key; a token cannot exist without an existing session. | **[Proposed]** |
 | Successor references another Token record and is itself unique (at most one successor per token), so token chains cannot fork. | **[Approved]** (rotation approved, USER-SD-DEC-004) |
 | Security Event may carry identifiers of a related customer, session, or token record, but retaining an event MUST NOT require retaining the corresponding session or token record indefinitely. Whether these are enforced foreign keys, plain recorded identifiers, or removed/anonymized on retention is not decided. | Independence **[Required for the proposal to be acceptable]**: see 8.4. Mechanism, referential actions, and anonymization/removal strategy **[Unresolved]** — USER-DM-DEC-007, 012 |
-| Customer Google account identifier is unique. | **[Required]** (USER-FR-010) |
+| The pair (identity provider, provider subject) is unique. | **[Required]** (USER-FR-010); pair form **[Approved]** |
 | Token verifier is unique across token records. | **[Proposed]** (a presented token must resolve to at most one record) |
 | Referential action when a customer is removed. | **[Unresolved]** — customer deletion is deferred (USER-DEC-011); no deletion behavior is defined or implied. Until decided, customers are not removed. |
 
@@ -228,7 +229,8 @@ All indexes are **[Proposed]** unless stated. Exact definitions belong to physic
 
 | Index | Purpose |
 |---|---|
-| Customer: unique on Google account identifier | Look up the customer at sign-in; enforces no duplicates (**[Required]** outcome, USER-FR-010). |
+| Customer: unique on (identity provider, provider subject) | Look up the customer at sign-in; enforces no duplicates (**[Required]** outcome, USER-FR-010). |
+| Customer: case-insensitive unique on email | Enforces email uniqueness and detects an email collision at sign-in. Used for conflict detection only, **never** to resolve identity or merge accounts. |
 | Customer: primary key on identifier | Resolve identity from a validated access token for `GET /users/me`. |
 | Token: unique on token verifier | Look up a presented token at refresh and logout; enforces one record per verifier. |
 | Token: on session | Find all tokens in a session when revoking or inspecting a session. |
@@ -237,7 +239,7 @@ All indexes are **[Proposed]** unless stated. Exact definitions belong to physic
 | Token / Session: on expiry (and revoked) | Support removal of expired or revoked records under a retention rule, once retention is decided. Deferred until retention is defined. |
 | Security Event: on occurred timestamp | Review recent events. |
 
-No index on email is proposed: email is not an identity or lookup key (USER-FR-005).
+The email index exists only to enforce uniqueness and detect collisions; email is not an identity or lookup key for resolving a customer (USER-FR-005).
 
 ## 8. Security and Privacy Considerations
 
@@ -351,7 +353,7 @@ IDs use `USER-DM-AC-nnn`. Each is verifiable against the physical design.
 |---|---|---|---|
 | USER-DM-AC-001 | A customer has an immutable, unique identifier that is never reused. | Required | USER-FR-040 |
 | USER-DM-AC-002 | At most one customer exists per Google account identifier, and a uniqueness rule enforces it. | Required | USER-FR-009, 010 |
-| USER-DM-AC-003 | Email is not the sole identity key and is never used to look up or merge identities. | Required | USER-FR-005, 047 |
+| USER-DM-AC-003 | Email is not the sole identity key and is never used to resolve a customer's identity or to merge accounts; it is used only to enforce uniqueness and detect conflicts. *(Amended Step 5d under owner delegation. Original wording: "Email is not the sole identity key and is never used to look up or merge identities.")* | Required | USER-FR-005, 047 |
 | USER-DM-AC-004 | Changing name or email does not create a new customer. | Required | USER-FR-046 |
 | USER-DM-AC-005 | Only approved customer data is stored; no other Google profile data is stored. | Required (field list is Proposed structure) | USER-FR-048; USER-DEC-010 |
 | USER-DM-AC-006 | Customer data can supply `id`, `name`, and `email` for `GET /users/me`, and the Google account identifier is not exposed. The representation of a missing name must follow USER-DM-DEC-010. The API's email response guarantee must be consistent with the final resolution of USER-DM-DEC-011. | Required for the fields and identifier protection; nullability behavior depends on the relevant approved decisions. | USER-FR-042; api-contracts §6.4 |
@@ -490,3 +492,72 @@ Where third-party cookies are blocked, each re-sign-in creates a session whose r
 
 ### 14.7 Still open for the physical design
 The connection method and role setup (USER-SD-DEC-026), the nonce cleanup details, whether absolute session expiry is stored or computed, the identifier format, the digest algorithm and its keying, constraint and index definitions, and retention.
+
+## 15. Identity, Profile and Event Decisions (Step 5c, 2026-10-25)
+Owner decisions recorded here use the repository IDs. **No physical schema, DDL or migration is created or decided.** Where an earlier row or acceptance criterion above conflicts, this section governs for the decisions listed, and the acceptance criteria wording is **not** altered silently (§15.9).
+
+### 15.1 Decisions
+| ID | Decision | Status |
+|---|---|---|
+| USER-DM-DEC-008 | Internal identifiers are **UUID v4 generated by PostgreSQL** | **Approved** |
+| Identity pair | The pair (identity provider, provider subject) is unique; the Google subject is the stable external identity; email is never the primary identity key and accounts are never merged by email | **Approved** |
+| USER-DM-DEC-001, 010 | Customer name is nullable; stored as NULL when Google provides no usable name; returned as `"name": null`; no placeholder | **Approved** |
+| USER-DM-DEC-011 | Email is required and validated (Google ID token and verified-email claim) before storage | **Approved** |
+| USER-DM-DEC-002 | Email is unique **case-insensitively**, with no automatic account merging | **Approved** (implications in §15.4; one case open) |
+| USER-DM-DEC-003 | The current profile (name, email) is updated at each successful sign-in from validated Google claims; historical orders keep a snapshot | **Approved** |
+| USER-DM-DEC-005 (remainder) | The absolute session expiry is stored at session creation | **Approved** |
+| USER-DM-DEC-012 | Security events use stable identifiers without foreign keys | **Approved (conditional)**: only if the retention design (USER-SD-DEC-020, open) supports it |
+| USER-DM-DEC-006 | Mandatory events are persisted and critical state changes are atomic with their required events | Principle **Approved**; the enumeration is **Proposed** (security-design §13.4) |
+
+### 15.2 Identity
+A customer is found by (identity provider, provider subject). Email is never used to find or merge a customer. A first sign-in with an unknown pair creates a customer, unless the email is already held by another customer (§15.4).
+
+### 15.3 Name
+Nullable. If Google supplies no name, or one that is empty after trimming, the stored value is NULL. The API returns the key with the value `null`. Nothing is derived from the email or invented.
+
+### 15.4 Email: implications of case-insensitive uniqueness (documented before any use)
+- **Validation and storage:** only after the Google ID token and its verified-email claim are validated. Stored exactly as Google supplies it. Comparison is case-insensitive; no dot or plus-tag stripping.
+- **Existing accounts:** none exist yet (nothing is implemented). If duplicates were ever present before the constraint is applied, they must be resolved by the owner manually; they are never merged automatically.
+- **Conflict at sign-in (unknown subject, email held by another customer):** sign-in is refused with `409 AUTH_IDENTITY_CONFLICT`; no customer is created, no session is issued, nothing is merged, and the mandatory identity-conflict event is recorded (security-design §13.4). The response does not reveal the other customer.
+- **Concurrent first sign-ins:** the same subject resolves to one customer (the unique pair absorbs the race); two different subjects with the same email result in one success and one conflict.
+- **Future Google identity linking:** a customer holding two Google accounts would need a deliberate, authenticated linking flow that proves both identities in one session. It is never automatic by matching email. With the provider and subject stored on the customer row, supporting several identities per customer would need a separate identity record later; that is a future migration, not a first-release feature (USER-DEC-009).
+- **Consequence (denial, not takeover):** a person who legitimately receives an address that another customer already holds (for example a reassigned address) cannot sign in and has no recovery path in the first release (account recovery is deferred, USER-DEC-011). A support or recovery procedure is **not defined** and is an open question.
+- **Decided (Step 5d, delegated): the locked-out address owner.** The first release has **no self-service recovery**. The `409` message tells the person to contact support. A **manual, owner-handled support procedure** (out-of-band verification, then manual resolution by the project owner, never an automatic merge) **must be defined and documented before production**. Contact details and the procedure itself are not invented here and are a production gate (security-design `USER-SD-AC-045`).
+- **Safety of email-based operations:** operations use the customer identifier, never an email lookup. A future feature that searches by email must treat a match as a hint and never as proof of identity.
+- **Decided (Step 5d, delegated):** when a customer with an existing subject signs in and Google now reports an email that another customer already holds, **sign-in succeeds** (identity is the subject), the **stored email is kept and not updated**, and a conflict event is recorded. Reason: the customer must not be locked out of their own account because of another customer's address, and no merge ever happens.
+
+### 15.5 Profile updates and order history
+| Data | Source | Change |
+|---|---|---|
+| **Current profile** (name, email) | The customer record | Updated at each successful sign-in from validated, verified-email Google claims, subject to §15.4 |
+| **Historical order data** | A snapshot taken by the Order domain at purchase | Never rewritten by later profile changes |
+Because name may be NULL, Checkout and Order must collect and snapshot fulfilment name and contact details themselves. This is a cross-domain dependency.
+
+### 15.6 Identifiers
+UUID v4 generated by PostgreSQL (database-supported random UUID generation; availability on the project's PostgreSQL version is confirmed at physical design) for customers, sessions, refresh-token records and security events. A nonce is identified by its digest.
+
+### 15.7 Session expiry
+The absolute session expiry (creation + 90 days) is stored when the session is created and is never changed by refresh (USER-SD-DEC-010).
+
+### 15.8 Security events
+- **Stable identifiers without foreign keys**, conditional on the retention design. Trade-offs: no referential integrity (identifiers must come from server state), but events survive removal of sessions, tokens and, later, customers, and retention stays independent.
+- **Atomicity:** a mandatory event is written in the same transaction as the state change it describes, so a failed event write fails the operation.
+- Ordinary IP logging is disabled by default (security-design §13).
+
+### 15.9 Tension with approved acceptance criteria (reported, not changed)
+- **USER-DM-AC-003** originally said email "is never used to look up or merge identities", which conflicted with conflict detection by email. **Amended in Step 5d** (see the criterion; the original wording is preserved in it).
+- **USER-DM-AC-002** refers to the "Google account identifier"; the pair form (provider, subject) is its approved meaning.
+
+### 15.10 Acceptance criteria derived from the approved decisions
+| ID | Criterion |
+|---|---|
+| USER-DM-AC-033 | The pair (identity provider, provider subject) is unique, and two customers can never share it. |
+| USER-DM-AC-034 | Two customers can never hold the same email ignoring case, and no account is merged automatically. |
+| USER-DM-AC-035 | A customer without a usable Google name has a NULL name, and the API returns `"name": null`. |
+| USER-DM-AC-036 | Identifiers are random UUIDs generated by PostgreSQL. |
+| USER-DM-AC-037 | A session's absolute expiry is stored at creation and never changed by refresh. |
+| USER-DM-AC-038 | A mandatory security event and the state change it describes commit together or not at all. |
+| USER-DM-AC-039 | A sign-in by an existing subject whose Google email collides with another customer succeeds, keeps the stored email, and records a conflict event. |
+
+### 15.11 Still open
+The retention design (which also decides the no-foreign-key choice); the content of the support procedure for a locked-out address owner (a production gate); the exact event list for failed sign-in and rate-limit rejection (decided as operational logs; see security-design §13.4).

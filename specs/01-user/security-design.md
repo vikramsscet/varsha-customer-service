@@ -82,7 +82,7 @@ This document does not assume anything marked unconfirmed.
 
 ## 3. Decision Register
 
-**Status vocabulary:** *Approved* · *Approved (conditional)* — approved by the owner, in principle or dependent on a stated condition; the dependent elements wait for that condition · *Open* · *Blocked by Deployment Details* (none currently).
+**Status vocabulary:** *Approved* · *Approved (conditional)* — approved by the owner, in principle or dependent on a stated condition · *Approved (delegated)* — decided by the assistant under the owner's Step 5d delegation (2026-10-25), reversible by the owner · *Open* · *Blocked by Deployment Details* (none currently).
 
 The project owner has approved **21 decisions outright and 6 conditionally or in principle**; **2 remain open** (017 rate limiting and 020 retention). **Approved:** 003 to 012, 015, 016, 018 (approach), 019 (principle), 021 (process), 022, 023 (single-tab), 024 (policy), 025, 028, 029. **Approved (conditional):** 001 (ID-token flow with a server-issued nonce, in principle), 002 (HS256 if Express is the only issuer and verifier), 013 and 014 (deployment profiles, no production profile selected), 026 (connection plan), 027 (page-held binder, in principle). Where only part of a decision was approved, the approved part is stated in **Approved choice** and the rest is listed as still open.
 
@@ -1035,7 +1035,7 @@ How Render exposes secrets for this service (who can read them, whether secret f
 | **Google client secret** | OAuth client credential for the authorization-code exchange; **not needed by the backend** under the ID-token flow | **Exposed** | **Rotation recommended before production.** See RISK-001. |
 | HS256 signing secret | To be generated; server-side only | Not yet created | Per §5.1 |
 
-**RISK-001 (unresolved security risk; owner decision, Step 5b).** The previously exposed Google client secret **remains in use for now** by the owner's decision. **This is not a secure or approved production state.** Anyone holding it could impersonate the application in an authorization-code exchange. What currently depends on it is unknown. While it remains: it is never copied into specifications, logs, source control or React code; if the backend holds it, it is server-side only; and rotation before production is recommended. Gating criterion USER-SD-AC-026 is revised accordingly.
+**RISK-001 (unresolved security risk; owner decision, Step 5b).** The previously exposed Google client secret **remains in use for now** by the owner's decision. **This is not a secure or approved production state.** Anyone holding it could impersonate the application in an authorization-code exchange. What currently depends on it is unknown. While it remains: it is never copied into specifications, logs, source control or React code; if the backend holds it, it is server-side only; and rotation before production is recommended. Gating criterion USER-SD-AC-026 is **NOT SATISFIED** while this risk is open.
 
 **RISK-002 (Supabase secret key).** The Supabase secret key was exposed. The owner has not decided whether to rotate it. Rotation before production is recommended, and it is unused by the design.
 
@@ -1066,7 +1066,7 @@ How Render exposes secrets for this service (who can read them, whether secret f
 
 **[Proposed] event types** (list is open, USER-DM-DEC-006): refresh-token reuse of an invalidated token; session revoked due to reuse (if adopted); identity conflict; unresolvable identity; repeated-failure/rate-limit trigger (optional, to support USER-SEC-009 review).
 
-**[Proposed] content:** event type, time, customer identifier if known, session/token-record identifier if known, request identifier. **Client network addresses and user-agent strings are not proposed**: they are personal data and no requirement justifies storing them (USER-FR-048 principle). **[Unresolved]** if the owner wants them for investigations, that is a privacy decision tied to USER-PRE-001.
+**[Approved: Step 5c] IP logging.** Ordinary logging of client IP addresses is **disabled by default**. It may be enabled only for a documented security need, and the justification must first state the purpose (for example rate-limit abuse analysis), who may read the logs, how long they are kept, and the privacy implications. None is approved. **[Proposed] event content:** event type, time, customer identifier if known, session or token-record identifier if known, request identifier. No client network address and no user-agent string is recorded by default.
 
 **[Proposed] storage:** database records for the required events, so they survive log rotation and can be reviewed (USER-FR-011 "recorded for review"), plus redacted structured application logging for operational monitoring. **[Unresolved]** (USER-DM-DEC-006).
 
@@ -1097,13 +1097,13 @@ How Render exposes secrets for this service (who can read them, whether secret f
 
 **[Proposed]** Additional events (session revoked due to reuse, rate-limit trigger) are optional and open under USER-SD-DEC-019.
 
-**Principle [Approved] (USER-SD-DEC-024):** a request stays rejected if a required security-event write fails; authentication acceptance does not depend on successful audit logging unless a specific, justified policy is approved. Every mandatory event accompanies a *rejection* (reuse, conflict, unresolved identity), so the request stays rejected whether or not the event is stored. Revocation of a session on reuse is a security state change attempted regardless of the event write; it is not an audit record.
+**Principle [Approved] (USER-SD-DEC-024; Step 5c):** mandatory security events are persisted, and **critical state changes are atomic with their required events**: a mandatory event is written in the same database transaction as the state change it describes, so a failed event write fails the operation (fail closed). A request that is already rejected stays rejected whether or not its event is stored. Events that describe no state change are operational logs unless made durable (§13.4). Revocation of a session on reuse commits together with its event.
 
 **Detecting persistence failures [Approved: must be detectable and monitored; mechanism Open]:** the result of every event write is checked. A failure produces an operational error entry (event type, request identifier, failure class; no credentials) and increments a monitored failure indicator. Where a fallback sink such as the application log is available, the event is emitted there so it is not silently lost.
 
 **Monitoring and alerting [Open]:** what monitoring and alerting exist, and who responds, is not established. The owner supplies this (USER-SD-DEC-024). Persistent event-write failure SHOULD raise an operational alert.
 
-**Which event-write failures may affect other operations [Proposed]:** none of the sign-in, refresh, logout, or identity-retrieval acceptance paths depends on an event write. If the database is unavailable altogether, those operations already fail with a dependency error. A policy that fails closed on event-write failure would need a specific, justified approval and is not proposed.
+**Which event-write failures affect other operations [Approved with the principle]:** a failure to write a mandatory event fails the operation it belongs to (sign-in, rotation, logout, session revocation), because the event and the state change are one transaction. A failure to write an operational log does not change an outcome; it is detected and surfaced. If the database is unavailable altogether, those operations already fail with a dependency error.
 
 **Content [Required]** (USER-FR-028; USER-SEC-008; USER-DM-AC-018): events contain only fixed fields taken from server-side state (event type, time, opaque customer, session, or token-record identifiers, request identifier). They never contain raw credentials, raw refresh tokens, token digests, secrets, or free text copied from requests. **[Proposed]** the set of fields is an allow-list, and event types use enumerated reason codes.
 
@@ -1121,6 +1121,22 @@ Retention is deferred pending privacy, legal, and operational review. **No perio
 | **Security events and audit records** | Review and investigation of mandatory events | How long events are kept, and whether they are anonymized or removed | Loss of the audit trail for the affected period. Events must not depend on token records being kept (USER-DM-AC-019) |
 
 Considerations for the review: privacy law and data-minimization duties, legal holds, investigation needs, the order-history retention analysis (USER-PRE-001), and storage cost. Retention of a nonce record (if §4.4 is approved) is short-lived and part of the same review.
+
+### 13.4 Event-type enumeration (persistence principle approved; the enumeration is proposed)
+**Decided (Step 5d, delegated):** mandatory security events are persisted and critical state changes are atomic with their required events (approved, Step 5c). The enumeration below is **adopted**: nonce replay and invalid nonce are **mandatory** (the nonce flow is retained); `AUTH_SIGN_IN_FAILED` and `AUTH_RATE_LIMIT_REJECTED` are **operational logs and metrics only**, because making them durable would let an attacker multiply database writes; they become durable and aggregated only if abuse investigation later requires it.
+| Event type | Durable | Atomic with the state change | Metadata | Purpose |
+|---|---|---|---|---|
+| `AUTH_SIGN_IN_SUCCEEDED` | Yes | Yes (session creation) | customer id, session id, request id | Audit |
+| `AUTH_REFRESH_ROTATED` | Yes | Yes (rotation) | session id, token-record id, request id | Audit |
+| `AUTH_REFRESH_REUSE_DETECTED` | Yes | Yes (session revocation) | session id, request id, reason code | Theft detection (mandatory) |
+| `AUTH_SESSION_REVOKED` | Yes | Yes | session id, reason code | Audit |
+| `AUTH_LOGOUT` | Yes | Yes (revocation) | session id, request id | Audit |
+| `AUTH_NONCE_REPLAY`, `AUTH_NONCE_INVALID` | Yes | n/a (request rejected) | request id, reason code; no nonce or binder | Replay detection |
+| `AUTH_IDENTITY_CONFLICT`, `AUTH_IDENTITY_UNRESOLVED` | Yes | n/a | customer id if known, reason code | Approved mandatory events |
+| `AUTH_SIGN_IN_FAILED` | Open | n/a | request id, generic reason code | Abuse signal |
+| `AUTH_RATE_LIMIT_REJECTED` | Open (a flood would multiply database writes) | n/a | request id, endpoint, key class | Abuse signal |
+| `AUTH_EVENT_PERSISTENCE_FAILED` | **No** (the database is the failing component) | n/a | event type, failure class, operational log and metric | Detect audit loss |
+Never recorded: raw tokens, token digests, nonces, binders, credentials, secrets, or client addresses by default.
 
 ## 14. Cross-Cutting Controls and Dependencies
 
@@ -1143,15 +1159,18 @@ Considerations for the review: privacy law and data-minimization duties, legal h
 
 | # | Package | Purpose | Security benefit | Alternatives (including built-in) | Maintenance and operational implications | Approval status |
 |---|---|---|---|---|---|---|
-| D1 | `google-auth-library` | Verify Google ID tokens on the backend (and exchange codes if the authorization-code flow is chosen) | Avoids hand-written signature, key-rotation and audience handling | `jose` with Google's published key set plus our own issuer, audience and verified-email checks; hand-written verification with Node's built-in crypto (higher risk) | Maintained by Google; carries its own dependencies; track advisories | Not approved |
-| D2 | `jose` | Sign and verify access-token JWTs; key identifiers; algorithm pinning | Strict algorithm and claim validation; supports rotation | `jsonwebtoken` (D3); hand-written with Node crypto (not recommended). Choose **one** of D2 or D3 | Widely used; check maintainer and advisories | Not approved |
-| D3 | `jsonwebtoken` | Same purpose as D2 | Same | `jose` (D2) | Widely used; check maintainer and advisories | Not approved |
-| D4 | `express-rate-limit` | Rate limiting middleware (§11.1) | A tested limiter instead of hand-written counters | Hand-written in-process counters; a database-backed limiter | Default store is per-process memory; shared stores would be additional packages | Not approved |
-| D5 | `cors` | CORS headers with the approved allow-list (§10.4) | Correct preflight and credentialed handling | Hand-written header handling (not recommended) | Small; configuration must match the allow-list | Not approved |
-| D6 | `cookie-parser` | Read the refresh-token cookie (Express does not parse cookies by itself) | Avoids ad-hoc cookie parsing | Parse the `Cookie` header manually; setting cookies needs no extra package | Only needed under the cookie transport | Not approved |
-| D7 | `helmet` | Security response headers | Standard hardening headers | Set headers manually | Optional; review default headers for an API | Not approved |
-| D8 | `pg` | PostgreSQL client with parameterized queries and transactions (needed for the atomic refresh transition) | Parameterized queries guard against injection when used consistently | The `postgres` client; an ORM would introduce another technology and is not approved | Connection pooling and error handling matter for ambiguous outcomes (§8.1) | **Driver choice approved in principle** (a standard PostgreSQL driver, not the Supabase client library; decision 026). Package and version approval still pending |
-| D9 | `dotenv` | Load a local `.env` in development | Keeps secrets out of code | Node.js built-in env-file support if the chosen Node.js version provides it (to verify) | Development only; production uses the platform's secrets | Not approved |
+| D1 | `google-auth-library` | Verify Google ID tokens on the backend (and exchange codes if the authorization-code flow is chosen) | Avoids hand-written signature, key-rotation and audience handling | `jose` with Google's published key set plus our own issuer, audience and verified-email checks; hand-written verification with Node's built-in crypto (higher risk) | Maintained by Google; carries its own dependencies; track advisories | Approved (delegated, 2026-10-25); install only on explicit instruction |
+| D2 | `jose` | Sign and verify access-token JWTs; key identifiers; algorithm pinning | Strict algorithm and claim validation; supports rotation | `jsonwebtoken` (D3); hand-written with Node crypto (not recommended). Choose **one** of D2 or D3 | Widely used; check maintainer and advisories | Approved (delegated, 2026-10-25), chosen over `jsonwebtoken`; subject to checking module-format compatibility with the Node.js version, advisories and licence before install |
+| D3 | `jsonwebtoken` | Same purpose as D2 | Same | `jose` (D2) | Widely used; check maintainer and advisories | Not selected (`jose` chosen); not approved |
+| D4 | `express-rate-limit` | Rate limiting middleware (§11.1) | A tested limiter instead of hand-written counters | Hand-written in-process counters; a database-backed limiter | Default store is per-process memory; shared stores would be additional packages | Approved (delegated, 2026-10-25); install only on explicit instruction |
+| D5 | `cors` | CORS headers with the approved allow-list (§10.4) | Correct preflight and credentialed handling | Hand-written header handling (not recommended) | Small; configuration must match the allow-list | Approved (delegated, 2026-10-25); install only on explicit instruction |
+| D6 | `cookie-parser` | Read the refresh-token cookie (Express does not parse cookies by itself) | Avoids ad-hoc cookie parsing | Parse the `Cookie` header manually; setting cookies needs no extra package | Only needed under the cookie transport | Approved (delegated, 2026-10-25); install only on explicit instruction |
+| D7 | `helmet` | Security response headers | Standard hardening headers | Set headers manually | Optional; review default headers for an API | Deferred: not needed for the first release; revisit later |
+| D8 | `pg` | PostgreSQL client with parameterized queries and transactions (needed for the atomic refresh transition) | Parameterized queries guard against injection when used consistently | The `postgres` client; an ORM would introduce another technology and is not approved | Connection pooling and error handling matter for ambiguous outcomes (§8.1) | **Driver choice approved in principle** (a standard PostgreSQL driver, not the Supabase client library; decision 026). Package approved under delegation (2026-10-25); install only on explicit instruction |
+| D9 | `dotenv` | Load a local `.env` in development | Keeps secrets out of code | Node.js built-in env-file support if the chosen Node.js version provides it (to verify) | Development only; production uses the platform's secrets | Deferred: production uses platform secrets and local development may use Node.js built-in env-file support (version to confirm) |
+| D10 | `express` | The approved web framework package | Track advisories | None (approved framework) | Mature | **Approved (delegated, 2026-10-25)**; install only on explicit instruction |
+| D11 | `node-pg-migrate` (development) | Version-controlled PostgreSQL schema changes as ordered migration files, run **only by the owner role** from a trusted machine, never by the Render runtime | Ordering and a tracking table; keeps the owner credential off the runtime | Plain SQL files applied by hand (no dependency, no tracking) | Verify maintenance and advisories | **Approved (delegated, 2026-10-25)**; install only on explicit instruction |
+| D12 | `pino` | Structured logging with redaction | Helps redaction, but an **allow-list logging rule** applies regardless | A small allow-list logger over the console | Optional | **Deferred** |
 | — | `@supabase/supabase-js` (Supabase client library) | Would access Supabase's HTTP APIs | — | Not used: the database is reached with a standard PostgreSQL driver | Would introduce the Data API surface | **Not approved; explicitly not to be used** (decision 026) |
 
 ## 15. Conflicts and Tensions Between Approved Requirements
@@ -1181,7 +1200,7 @@ Considerations for the review: privacy law and data-minimization duties, legal h
 | 21 | Supabase's HTTP data API exposure versus token-store disclosure protection (USER-SEC-011) | Approved restriction and access-control design (§2.1). Schema, roles and privileges are decided at physical design; RLS is not a replacement for permissions. |
 | 22 | Profile X cross-site cookies versus browser third-party-cookie blocking | Documented; users may need to sign in again; a CSRF token does not fix this (§10.6). Profile Y is the remedy once feasible. |
 | 23 | The approved `X-CSRF-Protection` and `403 REQUEST_REJECTED` versus the API contract | Written into api-contracts §11. |
-| 24 | The exposed Google client secret kept in use versus gating criterion USER-SD-AC-026 | Recorded as RISK-001; the criterion is revised (owner decision). Not a secure state. |
+| 24 | The exposed Google client secret kept in use versus gating criterion USER-SD-AC-026 | Recorded as RISK-001; USER-SD-AC-026 keeps its original wording and is **NOT SATISFIED**. Not a secure state. |
 | 25 | A nonce binder and session CSRF token versus the approved data model | Data-model §14 adds the nonce record and a CSRF-token digest on the session. |
 
 No contradiction requires changing an approved requirement unless the owner chooses Option C (§6.2).
@@ -1232,7 +1251,7 @@ IDs use `USER-SD-AC-nnn`. These are criteria for approving this design before im
 | USER-SD-AC-023 | The statement that revoking a refresh session does not automatically invalidate an issued JWT access token is present and unchanged. | Required | USER-FR-074, 085; USER-SEC-012 |
 | USER-SD-AC-024 | Refresh requests are coordinated one at a time per tab and never automatically retried after failure; the possibility of sign-out after a lost response is documented. | Required (frontend contract); cross-tab coordination Open | USER-SD-DEC-023, 009 |
 | USER-SD-AC-025 | Presenting a consumed refresh token revokes the entire affected session and records the event. | Required (approved) | USER-SD-DEC-008; USER-FR-082; USER-DM-AC-026 |
-| USER-SD-AC-026 | Before production the previously exposed Google client secret is rotated, or the owner re-records an explicit acceptance of RISK-001. It never appears in specifications, source control, logs or browser-delivered code. By owner decision (Step 5b) implementation may proceed with the risk recorded as unresolved. | Required before production | USER-SD-DEC-018; §12 |
+| USER-SD-AC-026 | The previously exposed Google client secret has been rotated before any Google sign-in implementation, and no client secret appears in specifications, source control, logs, or browser-delivered code. | Required (gating). **NOT SATISFIED:** the prerequisite (rotation of the exposed Google client secret) is unresolved; RISK-001 is open by owner decision to keep the secret temporarily | USER-SD-DEC-018; §12 |
 | USER-SD-AC-027 | No dependency is installed before it is individually approved, with its purpose, security implications, and alternatives documented. | Required | USER-SD-DEC-021 |
 | USER-SD-AC-028 | Cookie attributes, the CORS allow-list, and the CSRF strategy are verified against the cross-site relationship of the confirmed origins before approval; refresh and logout work in the supported browsers when third-party cookie restrictions apply. | Required (gating) | USER-SD-DEC-013, 014, 015, 016 |
 | USER-SD-AC-029 | The CORS allow-list contains only origins that the selected request and cookie strategy requires, uses no wildcard with credentialed requests, and does not list the API origin as the frontend's allowed origin. | Required | USER-SD-DEC-015 |
@@ -1242,7 +1261,7 @@ IDs use `USER-SD-AC-nnn`. These are criteria for approving this design before im
 | USER-SD-AC-033 | The rate-limit design states how the client address is identified and the trusted-proxy assumptions, and forwarded headers are not trusted without an explicit trusted-proxy configuration. | Required | USER-SD-DEC-017 |
 | USER-SD-AC-034 | The retention decision documents the effect of deleting consumed-token records on the ability to recognize reuse; no period is set without approval. | Required | USER-SD-DEC-020; §13.3 |
 | USER-SD-AC-035 | Startup validation covers required secrets and the approved lifetime maxima, and named owners exist for rotation, suspected compromise, and emergency revocation. | Required (gating) | USER-SD-DEC-018 |
-| USER-SD-AC-036 | Rotation of the exposed Supabase secret key before production is recommended (RISK-002; the owner has not decided). The authentication tables are verified not to be reachable through any Supabase HTTP API, and the connection mode is verified against the atomic refresh transition and ambiguous-outcome handling. | Required (verification); rotation recommended | USER-SEC-011; USER-SD-DEC-007, 025; §2.1 |
+| USER-SD-AC-036 | The exposed Supabase secret key is rotated before implementation. The database is verified not to expose the session, token-digest, nonce or event tables through any Supabase HTTP API, and the connection mode is verified against the atomic refresh transition and ambiguous-outcome handling. | Required (gating). **NOT SATISFIED:** the prerequisite (rotation of the exposed Supabase secret key) is unresolved; RISK-002 is open and the owner has not decided | USER-SEC-011; USER-SD-DEC-007; §2.1 |
 | USER-SD-AC-037 | RLS is treated as defense in depth, not as a substitute for database permissions. The database owner role and the Express application login are separate, and the application role holds only the privileges it needs (no schema-change, superuser or row-security-bypass rights). | Required (approved) | USER-SD-DEC-025, 026; §2.1 |
 | USER-SD-AC-038 | Render-to-Supabase connectivity is tested, and the connection method (direct, otherwise session-mode pooler) and role setup are confirmed by the owner, before the physical database design is finalized. TLS is required. | Required (gating) | USER-SD-DEC-026 |
 | USER-SD-AC-039 | The nonce is single-use, expires in five minutes, and is consumed atomically on first presentation of a validly signed token. The binder's limitations are validated with the negative checks and threat-model review in §4.4. | Conditional on decisions 001 and 027 | §4.4 |
@@ -1250,11 +1269,13 @@ IDs use `USER-SD-AC-nnn`. These are criteria for approving this design before im
 | USER-SD-AC-041 | Under Profile X, a failed refresh caused by a missing cookie leads to a sign-in prompt, with no automatic retry loop, and the orphaned-session effect is accounted for in rate limits and retention. | Required (approved) | USER-SD-DEC-029 |
 | USER-SD-AC-042 | No production profile is selected until the feasibility of the profile is verified, and the proxy assessment is documentation-only unless the owner authorizes a test. | Required | USER-SD-DEC-013; §10.7 |
 | USER-SD-AC-043 | The Supabase client library and the Data API are not used. | Required (approved) | USER-SD-DEC-025, 026 |
+| USER-SD-AC-044 | Before production, evidence is recorded that (a) database permissions are verified (role privileges, schema exposure through the HTTP APIs, RLS and grants), (b) authentication behavior is verified (all approved flows in the target browsers), and (c) secret handling is verified (secrets only server-side, startup validation, rotation procedure). | Required (gating; approved Step 5c); **NOT SATISFIED** until the evidence exists | USER-SD-DEC-018, 025, 026 |
+| USER-SD-AC-045 | A manual, owner-handled support procedure for customers refused with `409 AUTH_IDENTITY_CONFLICT` is defined and documented before production. | Required (gating; Step 5d); **NOT SATISFIED** | USER-DM-DEC-002; data-model §15.4 |
 
 ## 18. Decisions, Statuses, and Remaining Approvals
 
 ### 18.1 Approved
-003 to 012, 015, 016, 018 (approach), 019 (principle), 021 (process), 022, 023 (single-tab), 024 (policy), 025 (Supabase role and HTTP API restriction, in principle), 028 (session CSRF token), 029 (Profile X sign-in fallback).
+003 to 012, 015, 016, 018 (approach), 019 (principle; atomicity and IP logging default recorded in Step 5c, §13), 021 (process), 022, 023 (single-tab), 024 (policy), 025 (Supabase role and HTTP API restriction, in principle), 028 (session CSRF token), 029 (Profile X sign-in fallback). **Step 5c** identity, profile and email decisions are recorded in data-model §15.
 
 ### 18.2 Approved (conditional or in principle)
 | ID | Approved choice | Condition or limit |
@@ -1295,3 +1316,22 @@ Everything in 18.5, plus: API-DEC-004, 005, 006, 008, 009 to 015 (the API contra
 **Resolved by Step 5b:** the Supabase Auth and JWKS open questions; the `Path` inconsistency between api-contracts §5.3 and the profiles; the header-versus-introduction status mismatch in api-contracts; stale labels in this document and the data model.
 
 **Unresolved:** no production profile is selected; Profile X may require repeated sign-in in cookie-blocking browsers; RISK-001 and RISK-002; the physical-design blockers above.
+
+### 18.8 Decisions taken under the owner's delegation (Step 5d, 2026-10-25)
+The owner asked for the open questions to be decided. Everything below is **Approved (delegated)**: reasoned, recorded, and reversible by the owner. Items that need facts only the owner can supply stay open.
+
+| Question | Decision | Reason |
+|---|---|---|
+| Email collision for an existing subject | Sign in, keep the stored email, record an event (data-model §15.4) | Identity is the subject; do not lock the customer out |
+| Locked-out address owner | No self-service recovery; a manual, owner-handled support procedure must exist before production (`USER-SD-AC-045`) | A recovery flow is out of scope (USER-DEC-011); a procedure is still needed |
+| `USER-DM-AC-003` | Amended wording, original preserved | Resolves the conflict-detection tension |
+| Nonce replay; failed sign-in; rate-limit rejection | Replay is mandatory and durable; the other two are operational logs | Avoids write amplification |
+| `USER-SEC-014` to `016`, `USER-FR-087` | Added, as worded, with criteria `USER-AC-031` to `039` (requirements §12.7) | Make the approved design testable |
+| `API-DEC-005, 006, 008, 009, 010, 014, 015` | As recommended (api-contracts §13) | Consistent with the contract and requirements |
+| Dependencies | `express`, `pg`, `jose`, `google-auth-library`, `express-rate-limit`, `cors`, `cookie-parser`, `node-pg-migrate` (development) approved individually; `jsonwebtoken` not selected; `helmet`, `dotenv`, `pino` deferred (§14.1). **Nothing is installed.** | Each is needed by the approved design; the rest are optional |
+| Accountable owner for secrets, rotation and the infrastructure checks | **Defaults to the project owner (a role) until the owner names a person or delegate.** No name is invented. | An unowned role is itself a production risk |
+| Supabase secret key | **Rotate or revoke before production** (production gate; unused by the design) | Elevated and exposed (RISK-002) |
+| Google client secret | RISK-001 stays open and `USER-SD-AC-026` stays NOT SATISFIED; rotating it is a **production gate** | The owner's "temporarily" |
+| Who runs the infrastructure checks | The project owner or a delegate with the relevant Render, Supabase or Google access; timing as in the checklist | Only the owner has the access |
+
+**Not decided, because they need facts or a review only the owner can supply:** the connection method (needs the connectivity result), rate-limit numbers and the trusted-proxy hop count (need traffic and topology), retention periods (need a privacy, legal and operational review, and they also decide the no-foreign-key choice), which cookie profile is used in production, a named person for any role, and the numeric request-size limits.

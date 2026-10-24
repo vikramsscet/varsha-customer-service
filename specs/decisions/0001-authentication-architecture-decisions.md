@@ -54,3 +54,13 @@ Connection method and role confirmation (connectivity test); the Supabase projec
 |---|---|
 | 2026-10-24 | Step 5: refresh-token, session, access-token, event and CORS/CSRF principles approved; absolute session lifetime 90 days; deployment facts recorded |
 | 2026-10-24 | Step 5b: Supabase role, HS256, nonce, binder, CSRF token, header and status, profiles, secrets risk, and the two owner clarifications recorded; frontend contract created |
+| 2026-10-25 | Step 5c: identity and profile decisions (UUID v4, unique provider and subject, nullable name, required validated email, **case-insensitive email uniqueness**, profile updates, stored session expiry); events without foreign keys (conditional on retention); mandatory events atomic with state changes; IP logging off by default; individual dependency approvals; production verification gates; AC-026 and AC-036 restored and marked NOT SATISFIED |
+| 2026-10-25 | Step 5d: the owner delegated the open decisions; they were decided and recorded as **Approved (delegated)**, reversible by the owner (security-design §18.8) |
+
+## 7. Step 5c notes (2026-10-25)
+- **Email uniqueness:** the owner chose case-insensitive uniqueness over the recommended alternative (duplicates allowed). Implications are documented in data-model.md §15.4, including that a legitimate new owner of a reassigned address is locked out with no recovery path in the first release.
+- **Acceptance criteria:** the original wording of USER-SD-AC-026 and USER-SD-AC-036 was restored from an unedited copy of the file taken before they were rewritten, because git history contains only the rewritten text. Both are marked NOT SATISFIED.
+- **Not approved in Step 5c:** USER-SEC-014 to 016 and USER-FR-087; API-DEC-005, 006, 008, 009, 010, 014; the event enumeration; any dependency; named owners; the Supabase key rotation.
+
+## 8. Delegated decisions (Step 5d, 2026-10-25)
+The owner asked for the open decisions to be decided. They are recorded as **Approved (delegated)** in security-design.md §18.8, api-contracts.md §13, data-model.md §15 and requirements.md §12.7. The owner may override any of them. Still open, because only the owner can supply the facts: the connection method, rate-limit numbers and trusted-proxy hops, retention periods, the production cookie profile, named persons, and numeric request-size limits. Production gates added: a support procedure for the email conflict (`USER-SD-AC-045`), rotation of the exposed Supabase and Google secrets, and the verification evidence in `USER-SD-AC-044`.

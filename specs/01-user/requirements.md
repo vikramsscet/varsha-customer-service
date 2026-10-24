@@ -338,9 +338,9 @@ The project owner approved the security-design decisions below. This section rec
 ### 12.3 Open items that may later require a requirement
 - A maximum absolute session lifetime is now approved and added as USER-FR-086 (§12.4).
 - Google flow (USER-SD-DEC-001) and refresh-token transport (USER-SD-DEC-013) may affect USER-FR-001 to 011 and USER-FR-020 if they change the sign-in credential or add endpoints; any such change would be proposed for approval, not applied silently.
-- **Replay protection** is not stated in the approved requirements (USER-SEC-001 covers validation). If USER-SD-DEC-001 is approved with a server-issued nonce, a requirement would be proposed; none is added now.
-- **CSRF and CORS controls** are approved at security-design level (USER-SD-DEC-015, 016). If you want them as requirements, new USER-SEC identifiers would be proposed for approval; none is added now.
-- **Proposed requirements (not added; awaiting your explicit approval):** USER-SEC-014, replay protection of the Google sign-in credential by a server-issued single-use nonce; USER-SEC-015, CSRF controls for cookie-authenticated requests; USER-SEC-016, the authentication tables must not be reachable through any Supabase HTTP API. They are listed here so the approved design decisions are not mistaken for approved requirements.
+- **Replay protection** and **CSRF and CORS controls** are now requirements USER-SEC-014 and USER-SEC-015 (§12.7, approved under delegation).
+- See §12.7 for the requirements added in Step 5d.
+- **Requirements USER-SEC-014 to 016 and USER-FR-087** were added in §12.7 (Step 5d, approved under delegation).
 
 ### 12.4 Requirement added by an approved decision (USER-SD-DEC-010)
 | ID | Requirement |
@@ -359,3 +359,29 @@ The project owner approved the security-design decisions below. This section rec
 | Refresh-token expiry | Per-token expiry, 7 days by default, never later than the absolute session expiry |
 | Access-token expiry | 15 minutes by default; stateless; independent of the session |
 | Inactivity window | The refresh-token lifetime; there is no separate inactivity timer |
+
+### 12.6 Identity decisions recorded in Step 5c
+The owner approved case-insensitive email uniqueness (with no automatic merging), a unique (provider, subject) identity pair, a nullable name, required validated email, profile updates at each sign-in, and UUID identifiers. **No requirement text was changed.** They define the conflict cases of USER-FR-011 and USER-FR-066 (an email collision refuses sign-in and records the event) and are consistent with USER-FR-005, 046, 047 and USER-AC-013 and 023. Details are in data-model.md §15. One case remains open (an existing subject whose email now collides).
+
+### 12.7 Requirements added in Step 5d (approved under owner delegation, 2026-10-25)
+**No existing requirement text was changed.** The owner may override these.
+| ID | Requirement |
+|---|---|
+| USER-SEC-014 | The service MUST accept a Google identity credential only if it carries a nonce that the service issued, that has not expired, and that has not been used before. The service MUST consume the nonce atomically on the first presentation of a validly signed credential, whether or not sign-in then succeeds, and MUST reject any later presentation without creating a session. |
+| USER-SEC-015 | The service MUST reject any state-changing request authenticated by the refresh-token cookie unless its `Origin` exactly matches an allowed origin and it carries a valid session-scoped CSRF token in the `X-CSRF-Protection` header. These checks MUST complete before any refresh token is consumed or revoked. A rejected request MUST receive HTTP 403 with error code `REQUEST_REJECTED` and MUST NOT reveal which check failed. |
+| USER-SEC-016 | The tables holding customer identities, sessions, refresh-token digests, sign-in nonces and security events MUST NOT be readable or writable through any HTTP API exposed by the database hosting service. The application's runtime database role MUST hold only the privileges required by the approved operations and MUST be separate from the database owner role. |
+| USER-FR-087 | The service MUST allow an unauthenticated client to obtain a single-use sign-in nonce, valid for five minutes by configuration and bound to a client-supplied binder hash, and MUST rate-limit its issuance. |
+
+| ID | Acceptance criterion | Traces to |
+|---|---|---|
+| USER-AC-031 | A nonce presented a second time is rejected and creates no session. | USER-SEC-014 |
+| USER-AC-032 | An expired nonce is rejected. | USER-SEC-014; USER-FR-087 |
+| USER-AC-033 | Two simultaneous requests carrying the same nonce produce at most one success. | USER-SEC-014 |
+| USER-AC-034 | A refresh or logout failing the Origin, header or token check is rejected with 403 `REQUEST_REJECTED` and the refresh token is neither consumed nor revoked. | USER-SEC-015 |
+| USER-AC-035 | A refresh or logout request with a missing `Origin` is rejected. | USER-SEC-015 |
+| USER-AC-036 | Only a digest of the CSRF token is stored. | USER-SEC-015 |
+| USER-AC-037 | Each protected table is unreachable through the database host's HTTP APIs, checked as each API role. | USER-SEC-016 |
+| USER-AC-038 | The runtime role cannot alter schema and is separate from the owner role. | USER-SEC-016 |
+| USER-AC-039 | Nonce issuance is rate-limited. | USER-FR-087; USER-SEC-009 |
+
+**Verification.** Acceptance criteria are verified through a written acceptance-verification checklist run against a test environment (no unit tests). Creating that checklist as a documentation file is a proposed next step.
