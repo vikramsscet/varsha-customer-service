@@ -1,9 +1,9 @@
 # 01 — User & Authentication: Requirements
 
-**Status:** Ready for final approval — **not yet approved for implementation**
+**Status:** Approved for implementation planning, as confirmed by the project owner in the Step 3 and Step 4 instructions. Security-design decisions approved in Step 5 are recorded in §12.
 - All 14 previously open business decisions (USER-DEC-001 to USER-DEC-014) have been approved by the project owner.
 - This document has been updated to reflect those decisions.
-- The requirements are **not** formally approved for implementation until the project owner explicitly approves this updated document.
+- The project owner has since confirmed these requirements as approved for implementation planning. The Step 5 security-design decisions answer some of the open design questions (USER-Q-001, USER-Q-003) and are recorded in §12. **They do not change any requirement text.**
 
 **Scope of this document:** business and functional requirements only. No API contracts, data model, or implementation.
 
@@ -289,3 +289,73 @@ None of the 14 business decisions remains open. The following items are intentio
 ### 11.2 Remaining assumptions
 - Any behavior not stated above is not approved. Behavior assigned to another domain (§10) MUST be taken from that domain's approved specification, not assumed here.
 - Acceptance criteria marked as depending on other domains cannot be fully verified until those specifications are approved.
+
+## 12. Security-Design Decisions Incorporated (Step 5, 2026-10-24)
+
+The project owner approved the security-design decisions below. This section records them and their effect. **No existing requirement text or ID was changed.** One requirement (USER-FR-086) and one acceptance criterion (USER-AC-030) were added for the approved 90-day absolute session lifetime (§12.4). Details and rationale are in [security-design.md](security-design.md) §3.
+
+### 12.1 Approved decisions and effect on this document
+| Decision | Approved choice | Requirements it clarifies | Effect |
+|---|---|---|---|
+| USER-SD-DEC-004 | Strict single-use refresh-token rotation; no grace period | USER-FR-080–083 | USER-FR-080's "SHOULD" is not edited; the approved policy makes strict rotation the implemented behavior. The owner may choose to formalize it later. |
+| USER-SD-DEC-005 | Opaque, cryptographically random refresh tokens; not JWTs | USER-FR-075 | Consistent |
+| USER-SD-DEC-006 | Store a one-way digest of each refresh token; begin unkeyed; reassess keyed if database write access is in the threat model | USER-SEC-011; USER-AC-029 | Consistent |
+| USER-SD-DEC-007 | Consume the token and create its successor in one transaction; atomic or equivalently safe; ambiguous outcomes are never confirmed rollbacks; losing request gets the generic refresh error | USER-FR-076, 083 | Consistent |
+| USER-SD-DEC-008 | Consumed-token reuse rejects, records the event, and revokes the entire session | USER-FR-082; USER-AC-026, 027 | Applies USER-AC-026; no requirement text change (requirements defer session-level response to the security design) |
+| USER-SD-DEC-009 | Occasional sign-outs from lost responses and concurrent refreshes accepted; no grace period; no automatic retry | USER-FR-081 | Consistent |
+| USER-SD-DEC-003 | Access-token claims: issuer, audience, subject, issued-at, expiry; small, bounded, configurable clock skew that never bypasses expiry | USER-FR-023, 026, 053 | Consistent |
+| USER-SD-DEC-011 | Multiple active sessions per customer; logout ends only the current session; no logout-all endpoint in the first release | USER-FR-027, 073 | Resolves USER-Q-003 |
+| USER-SD-DEC-012 | Logout revokes the applicable refresh session; issued access tokens stay valid up to the 15-minute lifetime | USER-FR-073, 074, 084 | Consistent; residual window documented |
+| USER-SD-DEC-010 | Absolute session lifetime of **90 days**; a session must not exceed it even when actively refreshed; refreshing never extends it | USER-FR-071, 072 | Adds USER-FR-086 and USER-AC-030 (§12.4) |
+| USER-SD-DEC-013 | **Approved (conditional):** refresh-token `Secure` `HttpOnly` cookie, access token in memory; **Profile X and Profile Y are alternatives; no production profile is selected** until feasibility is verified | USER-SEC-010; USER-Q-004 | Conditional; depends on deployment feasibility |
+| USER-SD-DEC-014 | **Approved (conditional):** cookie attributes per profile (security-design §10.3) | USER-SEC-006, 010 | Conditional on the profile |
+| USER-SD-DEC-015 | Approved: sole CORS allowed origin `https://varsha-homemade.onrender.com`; no wildcard; credentials only if required | USER-SEC-003 | Revisit if custom domains are configured |
+| USER-SD-DEC-016 | Approved: `X-CSRF-Protection` header, `403 REQUEST_REJECTED`, Origin validation, missing `Origin` rejected on refresh and logout, session CSRF token | USER-SEC-007 | Design-level; no requirement text changed |
+| USER-SD-DEC-018 | Approved (approach): server-side environment secrets; startup validation; key identifiers and rotation; exposed Google client secret rotated before implementation | USER-SEC-003, 004 | Named owners still open |
+| USER-SD-DEC-001 | **Approved (conditional, in principle):** ID-token verification with a server-issued, single-use nonce, five-minute lifetime, page-held binder (decision 027) | USER-SEC-001; USER-FR-002, 007 | Documented in security-design §4.4; a replay-protection requirement is **proposed, not added** |
+| USER-SD-DEC-002 | **Approved (conditional):** HS256 if Express is the only application JWT issuer and verifier | USER-FR-026, 072; USER-SEC-002 | Consistent |
+| USER-SD-DEC-025 | Approved: Supabase hosts PostgreSQL only; Express authenticates; no Supabase Auth; no Data API dependence; authentication tables must not be exposed through Supabase's HTTP APIs | USER-SEC-011, 004 | Design-level; no requirement text changed |
+| USER-SD-DEC-026 | **Approved (conditional):** standard PostgreSQL driver; test connectivity first; dedicated least-privilege role separate from the database owner | USER-SEC-004 | Conditional on the connectivity test |
+| USER-SD-DEC-027 | **Approved (conditional, in principle):** page-held binder, with its limitations validated | USER-SEC-001 | Documented in security-design §4.4 |
+| USER-SD-DEC-028 | Approved: session-scoped CSRF token in both profiles | USER-SEC-007 | Design-level |
+| USER-SD-DEC-029 | Approved: Profile X may require users to sign in again where third-party cookies are blocked; the design handles it | USER-FR-070, 077 | Consistent |
+| USER-SD-DEC-022 | Immediate access-token revocation deferred | USER-FR-085 | Consistent |
+| USER-SD-DEC-015 (principle) | Explicit CORS allow-list; no wildcard origin with credentialed requests | USER-SEC-003 | Origins still open |
+| USER-SD-DEC-019 (principle) | Persist mandatory security events; redacted logs; no tokens, digests, credentials or secrets in logs | USER-FR-011, 028, 065, 066, 082; USER-SEC-008 | Event definitions, retention, operations still open |
+| USER-SD-DEC-021 (process) | Approve each dependency individually before installation | §11.1 constraint | Consistent |
+| USER-SD-DEC-023 (single tab) | One refresh at a time per browser tab; no automatic retry | USER-FR-083 | Cross-tab coordination still open |
+| USER-SD-DEC-024 (policy) | A request stays rejected if a required event write fails; failures detectable and monitored | USER-FR-082 | Monitoring mechanism still open |
+
+### 12.2 Status of the open design questions in §10
+| ID | Status after Step 5 |
+|---|---|
+| USER-Q-001 | **Resolved.** Strategy, format, storage approach, reuse response, concurrency and the 90-day absolute session lifetime are approved. A keyed digest is a conditional follow-up (USER-SD-DEC-006), not an open question. |
+| USER-Q-002 | **Open.** Rate-limit thresholds, storage, client-address identification and trusted-proxy assumptions (USER-SD-DEC-017, Open; targets proposed in security-design §11.1). |
+| USER-Q-003 | **Resolved.** Multiple sessions allowed; no logout-all in the first release. |
+| USER-Q-004 | **Resolved in part.** The refresh-token `Secure` `HttpOnly` cookie and in-memory access token are approved conditionally (USER-SD-DEC-013), with Profile X and Profile Y as alternatives; **no production profile is selected** until feasibility is verified. |
+| USER-Q-005 to USER-Q-008, USER-PRE-001 | Unchanged. |
+
+### 12.3 Open items that may later require a requirement
+- A maximum absolute session lifetime is now approved and added as USER-FR-086 (§12.4).
+- Google flow (USER-SD-DEC-001) and refresh-token transport (USER-SD-DEC-013) may affect USER-FR-001 to 011 and USER-FR-020 if they change the sign-in credential or add endpoints; any such change would be proposed for approval, not applied silently.
+- **Replay protection** is not stated in the approved requirements (USER-SEC-001 covers validation). If USER-SD-DEC-001 is approved with a server-issued nonce, a requirement would be proposed; none is added now.
+- **CSRF and CORS controls** are approved at security-design level (USER-SD-DEC-015, 016). If you want them as requirements, new USER-SEC identifiers would be proposed for approval; none is added now.
+- **Proposed requirements (not added; awaiting your explicit approval):** USER-SEC-014, replay protection of the Google sign-in credential by a server-issued single-use nonce; USER-SEC-015, CSRF controls for cookie-authenticated requests; USER-SEC-016, the authentication tables must not be reachable through any Supabase HTTP API. They are listed here so the approved design decisions are not mistaken for approved requirements.
+
+### 12.4 Requirement added by an approved decision (USER-SD-DEC-010)
+| ID | Requirement |
+|---|---|
+| USER-FR-086 | The **absolute session lifetime** MUST NOT exceed **90 days** (approved by the project owner, Step 5). A session's **absolute session expiry** is fixed at session creation and MUST NOT be extended by refreshing. A **refresh-token expiry** (7 days by default; USER-FR-071, 072) MUST NOT be later than the session's absolute session expiry. A refresh attempted at or after the absolute session expiry MUST be rejected under USER-FR-076, and the customer MUST sign in with Google again. Already-issued access tokens are not affected beyond their own expiry (USER-FR-074). |
+
+| ID | Acceptance criterion | Traces to |
+|---|---|---|
+| USER-AC-030 | A session that is actively refreshed cannot obtain a successful refresh 90 days after its creation; a successor token's expiry never exceeds the session's absolute expiry; the absolute expiry does not change on refresh. | USER-FR-086; USER-SD-DEC-010 |
+
+### 12.5 Terminology
+| Term | Meaning |
+|---|---|
+| Session (refresh session) | The record created at one sign-in; the unit of revocation; the family of that sign-in's refresh tokens |
+| Absolute session expiry | Session creation + 90 days; fixed; never extended by refreshing |
+| Refresh-token expiry | Per-token expiry, 7 days by default, never later than the absolute session expiry |
+| Access-token expiry | 15 minutes by default; stateless; independent of the session |
+| Inactivity window | The refresh-token lifetime; there is no separate inactivity timer |

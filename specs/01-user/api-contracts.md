@@ -1,8 +1,8 @@
 # 01 — User & Authentication: API Contracts
 
-**Status:** Draft — pending project owner review
+**Status:** Approved for implementation planning (project owner). Decisions carry their own statuses: §9 (original), §10 (Step 5) and §11 (Step 5b). Elements not marked approved remain proposed.
 
-All endpoints, status codes, error codes, field names, headers, and token-transmission choices in this document are **proposed** and remain open for review. Nothing here is approved until the project owner says so. Items needing a decision are collected in §9 (`API-DEC-xxx`).
+Elements are **approved only where §10 or §11 records an approval**; everything else in this document is **proposed** and remains open for review. Items needing a decision are collected in §9 (`API-DEC-xxx`), and §10 and §11 record later approvals. Where a later section and an earlier one differ, the later section governs.
 
 **Source of truth:** [requirements.md](requirements.md). This document does not change the requirements. Where a requirement cannot be represented cleanly in the API, it is flagged in §8 rather than altered.
 
@@ -135,7 +135,7 @@ This is a proposal only. It is not treated as approved.
 | Refresh token in response body (alternative) | Works uniformly for any client; no CSRF on refresh. | Must be stored by the client in script-accessible storage, which raises theft risk; the larger exposure is why the cookie option is being evaluated. |
 
 ### 5.3 Considerations if the cookie option is adopted (decisions needed, not finalized)
-- **Cookie attributes:** `Secure`, `HttpOnly`, a `SameSite` value, a narrow `Path` (for example limited to the auth endpoints), `Max-Age`/`Expires` aligned with the configured 7-day lifetime (USER-FR-071/072). The `SameSite` value and a cookie name/prefix depend on the deployment origins (unknown, see §5.4). Not finalized.
+- **Cookie attributes:** superseded by the two alternative profiles in §11.3 (security-design §10.3). The earlier narrow-`Path` proposal conflicts with the approved `Path=/` baseline and the `__Host-` prefix, and is no longer proposed.
 - **CSRF:** refresh and logout would be cookie-authenticated state-changing requests. Candidate mitigations (to be chosen, not selected here): `SameSite` restrictions, `Origin`/`Referer` validation, a required custom request header, and a CSRF token. Choice depends on whether frontend and API are same-site or cross-site.
 - **Cross-origin deployment** (frontend and API on different origins): would require an explicit CORS allow-list (no wildcard when credentials are used), `Access-Control-Allow-Credentials`, frontend requests sent with credentials, and likely `SameSite=None; Secure`, which weakens the built-in CSRF protection and makes the explicit CSRF mitigation mandatory. Third-party-cookie restrictions in browsers may also affect cross-site cookies.
 - **Same-site deployment** (for example, a frontend and API on subdomains of one registrable domain): `SameSite=Lax` or `Strict` may be viable, with simpler CSRF protection.
@@ -244,7 +244,7 @@ No credential, token, Google error detail, or account information is returned.
 
 **Success — `200 OK`**
 
-Headers: `Cache-Control: no-store`; and, **if rotation is confirmed** (USER-Q-001), `Set-Cookie` with the replacement refresh token.
+Headers: `Cache-Control: no-store`; and, because rotation is approved (USER-SD-DEC-004), the replacement refresh token is returned (as `Set-Cookie` under the proposed cookie transport, which is still open under API-DEC-002).
 ```json
 {
   "accessToken": "<access-token>",
@@ -282,17 +282,17 @@ The response MUST NOT reveal whether the token was expired, revoked, consumed, o
 **Required behaviors — with details still pending (USER-Q-001)**
 | Required behavior (from requirements) | Status |
 |---|---|
-| Rotation is the recommended initial policy: a successful refresh consumes the presented token and issues a replacement (USER-FR-080). | **Pending confirmation** in the security design. The contract above is conditional on it. |
+| Rotation is the recommended initial policy: a successful refresh consumes the presented token and issues a replacement (USER-FR-080). | **Approved** (USER-SD-DEC-004, Step 5): strict single-use rotation. The conditional wording above now applies. |
 | A consumed refresh token MUST NOT be reusable (USER-FR-081). | Required. |
 | Presenting an invalidated token MUST be rejected, recorded as a security event without logging the token, and disclose nothing about its prior state (USER-FR-082). | Required. The response is `401 AUTH_REFRESH_TOKEN_INVALID`. |
-| Whether reuse of a consumed token also revokes the whole refresh session. | **Unresolved** (USER-Q-001). Not decided here. |
-| Concurrent requests with the same token: at most one succeeds, with no undefined session state or more than one usable chain (USER-FR-083). | Required. The mechanism is **unresolved** (USER-Q-001). The losing request is proposed to return `401 AUTH_REFRESH_TOKEN_INVALID`; an alternative such as a distinct retry-safe response is unresolved (API-DEC-007). |
-| Tolerance for benign client retries (for example, a lost response). | **Unresolved** (USER-Q-001). Not decided here. |
-| Lost-response recovery (a refresh succeeded on the server but the client never received the replacement token). | **Unresolved** security-design decision (USER-Q-001). Until approved, the consumed token is **not** reusable (USER-FR-081), so a client in this state must be treated as unable to refresh and must sign in again. |
-| Session-level revocation on reuse of a consumed token. | **Unresolved** (USER-Q-001). |
+| Whether reuse of a consumed token also revokes the whole refresh session. | **Approved** (USER-SD-DEC-008): yes, the entire affected session. |
+| Concurrent requests with the same token: at most one succeeds, with no undefined session state or more than one usable chain (USER-FR-083). | Required. **Approved** (USER-SD-DEC-007): atomic conditional update or equivalently safe transaction strategy, with consume and successor creation in one transaction; an ambiguous outcome is never treated as a confirmed rollback; the losing request returns the generic `401 AUTH_REFRESH_TOKEN_INVALID` without revealing token state. This resolves API-DEC-007. |
+| Tolerance for benign client retries (for example, a lost response). | **Approved** (USER-SD-DEC-009): none. No grace period and no automatic retry of a failed refresh. |
+| Lost-response recovery (a refresh succeeded on the server but the client never received the replacement token). | **Approved** (USER-SD-DEC-009): occasional sign-out is accepted. The consumed token is not reusable (USER-FR-081); the client must sign in again. |
+| Session-level revocation on reuse of a consumed token. | **Approved** (USER-SD-DEC-008): the entire affected session is revoked. |
+| Refresh-token format and storage; no usable refresh tokens exposed if the token store is disclosed (USER-SEC-011). | **Approved** (USER-SD-DEC-005, 006): opaque random token, not a JWT; stored as a one-way digest, unkeyed to begin; the protection requirement stands. |
 
 **No grace period.** This contract does not define a grace period and does not permit reuse of a consumed refresh token. Any such behavior requires explicit security-design approval and a requirements update, because it would affect USER-FR-081.
-| Refresh-token format and storage; no usable refresh tokens exposed if the token store is disclosed (USER-SEC-011). | Format and storage **unresolved**; the protection requirement stands. |
 
 **Security.** USER-SEC-005, 006, 008, 009, 010, 011; USER-FR-082, 083.
 
@@ -487,3 +487,125 @@ All Status: **Open**. Proposals are recommendations only.
 | API-DEC-015 | Approval of the four-endpoint inventory, and that logout-from-all-devices is excluded pending USER-Q-003. | As drafted. |
 
 Related items still held by other steps: USER-Q-001 (refresh-token format, storage, rotation confirmation, reuse response, concurrency, retry tolerance), USER-Q-002 (rate-limit thresholds), USER-Q-003 (concurrent sessions, logout-all), USER-Q-005 (operation lists), USER-Q-006 (guest cart mechanism), USER-Q-008 (data model).
+
+## 10. Security-Design Decision Updates (Step 5, 2026-10-24)
+
+Decisions approved by the project owner that affect these contracts. Full detail is in [security-design.md](security-design.md) §3. **The endpoint inventory is unchanged, and no endpoint was added.** A formatting defect in §6.2 (a table row left after the "No grace period" paragraph) was repaired by moving that row back into its table; its meaning is unchanged apart from the approvals recorded above.
+
+### 10.1 API decisions
+| ID | Status after Step 5 | Note |
+|---|---|---|
+| API-DEC-001 | **Approved (conditional)** | Google ID-token flow with a server-issued, single-use nonce, five-minute lifetime (USER-SD-DEC-001, in principle). Documented in §11.1 and §11.2 for final review. |
+| API-DEC-002 | **Approved (conditional)** | Refresh-token transport (USER-SD-DEC-013): `Secure`, `HttpOnly` refresh cookie and in-memory access token. **Profile X (current Render origins) and Profile Y (custom domains or proxy) are alternatives; no production profile is selected** until feasibility is verified (§11.3). |
+| API-DEC-003 | **Approved** | CORS allow-list principle and CSRF baseline: `X-CSRF-Protection`, `403 REQUEST_REJECTED`, Origin validation, missing `Origin` rejected on refresh and logout, session CSRF token (USER-SD-DEC-015, 016, 028). Cookie attributes per profile (§11.3) remain conditional. |
+| API-DEC-004 | Open | Unchanged |
+| API-DEC-005 | Open | Unchanged |
+| API-DEC-006 | Open | Unchanged |
+| API-DEC-007 | **Approved** | The losing request in a concurrent refresh returns the generic `401 AUTH_REFRESH_TOKEN_INVALID` (USER-SD-DEC-007). Benign retries are not tolerated (USER-SD-DEC-009). |
+| API-DEC-008 | Open | `204` versus `401` for logout with a stale or unknown token is unchanged. Approved: logout revokes the applicable refresh session; a revocation that cannot be persisted is never reported as success (USER-SD-DEC-012). |
+| API-DEC-009 to 015 | Open | Unchanged, except API-DEC-015: the inventory is now documented with **five** endpoints (§11.5), pending final approval. API-DEC-012 (guest-cart merge) stays with the Cart specification. |
+
+### 10.2 Contract behavior now approved
+- `POST /auth/refresh` is a strict single-use rotation: each success consumes the presented token and returns a replacement (USER-SD-DEC-004).
+- Presenting a consumed refresh token returns the generic refresh error, records a security event, and revokes the whole session, after which no token in that session refreshes (USER-SD-DEC-008).
+- No grace period, and the client must not automatically retry a failed refresh; clients make one refresh request at a time per tab (USER-SD-DEC-009, 023).
+- `POST /auth/logout` ends only the current session; there is no logout-all endpoint in the first release (USER-SD-DEC-011, 012).
+- Already-issued access tokens may stay valid until their expiry, up to 15 minutes by default (USER-SD-DEC-012, 022).
+- Access-token claims are issuer, audience, subject, issued-at and expiry (USER-SD-DEC-003).
+- A refresh attempted at or after the session's absolute expiry (90 days after sign-in, USER-SD-DEC-010) returns the generic refresh error and the customer signs in again. Refreshing never extends the session, and a successor token's expiry never exceeds the session's absolute expiry. This adds no field and no endpoint.
+
+### 10.3 Still open and affecting the contracts
+Sign-in request schema (API-DEC-001), refresh-token transport and cookie behavior (API-DEC-002, 003; note that §5's cookie proposal was written before the confirmed origins were found to be cross-site), logout status for stale tokens (API-DEC-008), the status code for a failed CSRF check, and whether a nonce endpoint or callback endpoint is added (neither is approved).
+
+### 10.4 Contract changes the server-issued nonce would require (NOT approved)
+The recommendation for decision USER-SD-DEC-001 is the Google ID-token flow with a server-issued, single-use nonce. It is **not approved**, and **nothing in §1 to §9 has been changed**. If you approve it, the contract would change as follows, for review before any implementation.
+
+| Item | Proposed change |
+|---|---|
+| New endpoint (provisional) | `POST /api/v1/auth/google/nonce`. Access category: public. No request body. |
+| Success | `200 OK` with `Cache-Control: no-store` and a body such as `{ "nonce": "<server-issued-nonce>", "expiresIn": <seconds, from configuration> }`. The value is random, single-use and short-lived. |
+| Errors | `429 RATE_LIMITED`, `503 SERVICE_UNAVAILABLE`, `500 INTERNAL_ERROR`, in the shared error format (§3). |
+| `POST /api/v1/auth/google` | No new required field is proposed. The credential's nonce claim must match a live, unconsumed server-issued nonce, which is consumed on first presentation whether sign-in succeeds or fails. An absent, unknown, expired or consumed nonce returns the generic `401 AUTH_GOOGLE_FAILED`. Whether an optional client-binding handle is added is open. |
+| Endpoint inventory (§1) | Grows from four to five endpoints; this affects API-DEC-015. |
+| Cross-cutting | The new endpoint is rate-limited and covered by the CORS allow-list. Nonce state is not in the approved data model (data-model §13.6). |
+
+### 10.5 Contract changes from the approved CSRF, CORS and cookie decisions
+Recorded for contract review; superseded in detail by §11, which writes these controls into the contract.
+- **Refresh and logout:** require a custom request header (name not chosen; add it to §2.2 when approved) and a valid `Origin` that matches the configured frontend origin. A request failing either check is rejected **before** any token is consumed, with a generic response that reveals no token state. The status code and error code are open (API-DEC-003).
+- **CORS:** `Access-Control-Allow-Origin` names the exact allowed origin `https://varsha-homemade.onrender.com` (not a wildcard); credentials are allowed only when the cookie strategy is in effect; allowed methods `GET`, `POST`, `OPTIONS`; allowed headers `Authorization`, `Content-Type` and the custom header; responses vary on `Origin`.
+- **Cookie:** the baseline replaces the open attribute list in §5.3, conditional on API-DEC-002. `Path=/` means the cookie is sent on every request to the API host, which accepts it only on refresh and logout.
+- **No other endpoint is added.**
+
+## 11. Authentication Transport, Nonce and CSRF Contract (Step 5b, 2026-10-24)
+Records the contract effect of decisions USER-SD-DEC-001, 013, 014, 015, 016, 027, 028, 029. Full design and rationale are in [security-design.md](security-design.md) §4.4 and §10. **No production profile is selected.** This section extends §3, §4 and §6; where it differs from them, this section governs.
+
+### 11.1 New endpoint: `POST /api/v1/auth/google/nonce` (approved in principle; for final review)
+**Why it exists:** only the server can know that a nonce was issued and used exactly once.
+
+| Item | Contract |
+|---|---|
+| Purpose | Issue a short-lived, single-use nonce for one Google sign-in attempt |
+| Access category | Public. No access token and no cookie credential. |
+| Request headers | `Content-Type: application/json`, `Accept: application/json` |
+| Request body | `{ "binderHash": "<one-way hash of the page-held binder>" }` (hash algorithm and encoding are fixed at implementation planning; SHA-256 with URL-safe encoding is proposed) |
+| Validation | `binderHash` is required, a string, within length bounds, and uses the expected character set |
+| Success | `200 OK`, `Cache-Control: no-store`, body `{ "nonce": "<server-issued-nonce>", "expiresIn": 300 }`. The lifetime is five minutes and is read from configuration. |
+| Errors | `400 VALIDATION_FAILED`, `429 RATE_LIMITED`, `503 SERVICE_UNAVAILABLE`, `500 INTERNAL_ERROR`, in the shared error format (§3) |
+| Security | The nonce is random from a cryptographically secure source. It is never logged. The endpoint is rate-limited and caps outstanding nonces per client. |
+| Cookies and CSRF | None; it does not use the refresh cookie |
+| Traceability | USER-SD-DEC-001, 027; security-design §4.4 |
+
+### 11.2 `POST /api/v1/auth/google`: changes
+- **Request:** `{ "credential": "<google-id-token>", "binder": "<raw page-held binder>" }`. `binder` is required and validated.
+- **Processing order:** verify the Google token (signature, issuer, audience, expiry, verified email) → atomically consume the nonce carried in the token → check that the binder hashes to the stored hash → find or create the customer by Google `sub` → create the session.
+- **Failure:** an absent, unknown, expired or consumed nonce, or a wrong binder, returns the generic `401 AUTH_GOOGLE_FAILED`, creates no session, and records a security event without the credential.
+- **Success response** gains one field: `csrfToken`, the session-scoped CSRF token. It is returned **once** and never again.
+
+```json
+{
+  "accessToken": "<access-token>",
+  "tokenType": "Bearer",
+  "expiresIn": 900,
+  "csrfToken": "<session-csrf-token>",
+  "customer": { "id": "<internal-customer-id>", "name": "Example Customer", "email": "customer@example.com" }
+}
+```
+The refresh token is set as a cookie (§11.3). Customer field nullability remains open (USER-DM-DEC-001, 010, 011).
+
+### 11.3 Cookie and CORS behavior by alternative profile
+Alternatives, not simultaneously active. Neither is production-ready until its prerequisites are verified.
+| | Profile X: current Render origins (cross-site) | Profile Y: custom domains (Y1) or same-origin proxy (Y2) |
+|---|---|---|
+| Refresh cookie | `Secure; HttpOnly; SameSite=None`, host-only | `Secure; HttpOnly; SameSite=Lax`, host-only; `Path=/` allows `__Host-` |
+| `Path` | `/` or a restricted path | `/` (Y1); a restricted path advisable for Y2 |
+| CORS | Credentialed; exact origin `https://varsha-homemade.onrender.com`; `Vary: Origin`; allowed headers `Authorization`, `Content-Type`, `X-CSRF-Protection` | Y1: credentialed for the new frontend origin. Y2: none |
+| Browser risk | Browsers that block third-party cookies may prevent silent refresh; a CSRF token does not fix that (security-design §10.6) | Cookie not third-party |
+
+**Profile X behavior the contract must allow:** if the refresh cookie is not stored or not sent, `POST /auth/refresh` returns the generic `401 AUTH_REFRESH_TOKEN_INVALID`, and the customer signs in again.
+
+### 11.4 CSRF controls on refresh and logout
+`POST /auth/refresh` and `POST /auth/logout` are cookie-authenticated and state-changing, so they require:
+- `Origin` present and exactly equal to the configured frontend origin;
+- `X-CSRF-Protection: <csrfToken>` present and matching the session's CSRF token (compared by digest);
+- the refresh cookie.
+
+Checks run **before any token is consumed** or revoked. A failure returns:
+```json
+{ "error": { "code": "REQUEST_REJECTED", "message": "The request could not be completed.", "requestId": "req_example_123" } }
+```
+with HTTP `403`. The response is identical for every cause (missing `Origin`, wrong `Origin`, missing header, wrong token), and is not retried by the client. A missing refresh cookie is the generic `401 AUTH_REFRESH_TOKEN_INVALID`. **A missing `Origin` is rejected** on these two endpoints.
+
+Not cookie-authenticated, so no CSRF controls: `POST /auth/google`, `POST /auth/google/nonce`, `GET /users/me`.
+
+Headers added to the tables in §2.2 for refresh and logout: `Origin` (set by the browser) and `X-CSRF-Protection`.
+
+### 11.5 Error codes and endpoint inventory
+Extends the §4 mapping:
+| Scenario | Status | Code |
+|---|---|---|
+| Cookie-authenticated request fails the Origin, header or CSRF-token check | 403 | `REQUEST_REJECTED` |
+
+**Endpoint inventory (API-DEC-015, pending final approval):** `POST /auth/google/nonce` (new), `POST /auth/google`, `POST /auth/refresh`, `POST /auth/logout`, `GET /users/me`. No logout-all endpoint.
+
+### 11.6 Still open and affecting the contract
+Sign-in request and response schema final review (API-DEC-001); the unverified-email code, expired-token code, 200 versus 201 and logout status for stale tokens (API-DEC-004 to 008); access categories, field limits, profile fields, identity-conflict triggers and the error-envelope approval (API-DEC-009 to 014); which profile is used in production.

@@ -84,3 +84,20 @@ For each domain, follow this sequence:
 8. Integration & Final Verification
 
 Dependencies may be identified during specification, but the implementation sequence must not be changed without discussion and approval.
+
+## Domain Document Index
+
+### 01 — User & Authentication
+| Document | Purpose |
+|---|---|
+| [01-user/requirements.md](01-user/requirements.md) | Requirements and acceptance criteria |
+| [01-user/api-contracts.md](01-user/api-contracts.md) | Endpoint contracts and API decisions |
+| [01-user/data-model.md](01-user/data-model.md) | Logical data model |
+| [01-user/security-design.md](01-user/security-design.md) | Security decisions and register |
+| [01-user/frontend-contract.md](01-user/frontend-contract.md) | Browser authentication behavior |
+
+### Decision records
+| Record | Purpose |
+|---|---|
+| [decisions/0001-authentication-architecture-decisions.md](decisions/0001-authentication-architecture-decisions.md) | Owner decisions, risks and history |
+| [decisions/0002-sdd-readiness-review.md](decisions/0002-sdd-readiness-review.md) | Implementation-readiness review |
