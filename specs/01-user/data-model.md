@@ -45,7 +45,9 @@ Section 10 holds the full traceability matrix.
 | **Refresh Token** | One issued refresh credential within a session (stored only in non-reusable form). | **[Proposed]** structure; need is **[Required]** |
 | **Security Event** | Record of security-relevant occurrences for review. | **[Proposed]** structure; the need to record is **[Required]** (USER-FR-011, 065, 066, 082) |
 
-**[Proposed]** Session and Token are separate entities so that, if rotation is adopted (USER-FR-080, unresolved), a session can hold a chain of tokens and be revoked as a unit. If rotation is not adopted, the two collapse into one record without affecting the Customer entity or the API. **[Unresolved]** pending USER-Q-001.
+**[Proposed]** Customer, Refresh Session, and Refresh Token are kept as separate logical entities. A session is the unit of revocation and can hold one or more token records. A **token chain is not mandatory**: it exists only if rotation is approved (USER-FR-080, **[Unresolved]** under USER-Q-001). If rotation is not approved, a session may hold a single token record, or the two entities may be merged at physical design, without affecting the Customer entity or the API. The separation does not prejudice the approved refresh-token security requirements (section 5.3).
+
+**[Proposed]** The logical Refresh Token entity describes the behavior and state needed to manage refresh credentials; it does not mandate a separate physical table. The final physical representation must support all approved refresh-token security requirements. Fields such as consumption state and successor relationships apply only where required by the approved strategy. Any simplification or merging of entities must preserve revocation, expiry, concurrency safety, invalidated-token event recording, and token-store disclosure protection.
 
 No other entities are proposed. Considered and excluded: a login-history table, a profile table, a role table, and a provider-link table (none is justified by the approved requirements; USER-DEC-009 defers account linking).
 
@@ -86,9 +88,14 @@ Shipping addresses and phone numbers needed for delivery belong to Checkout/Deli
 - The stable Google account identifier does not change when email or name changes.
 
 ### 4.5 Nullability implications for the approved API
-The API returns `customer.id`, `customer.name`, `customer.email` and defers requiredness to this data model (api-contracts §6.4).
-- `id` and `email`: always present for a stored customer (**[Proposed]** email NOT NULL, because sign-in requires a verified email).
-- `name`: **[Proposed]** nullable, because Google may not supply a name. The API example shows a name string; if name is nullable, the response field could be `null` or absent. This is an implication to confirm, **not** a change to the API contract. USER-DM-DEC-001.
+
+The API returns `customer.id`, `customer.name`, and `customer.email`. The API contract (api-contracts.md, §6.4) leaves field nullability to this data model.
+
+- `id`: Always present for a stored customer. The customer identifier is required.
+- `name`: **[Proposed]** The logical field is nullable because the approved requirements do not guarantee that Google always supplies a name. The API example shows a name string, but the contract does not specify how a missing name is represented. How `GET /api/v1/users/me` represents a missing name remains an open decision (USER-DM-DEC-010): `name: null`, omission of the field, or another explicitly agreed representation. This document does not change the API contract; if the selected behavior differs from what the contract already permits, the contract must be amended through its own review.
+- `email`: **[Proposed]** The Customer record requires an email because sign-in requires a verified email (USER-FR-006). However, making email non-null in the data model remains subject to confirmation of the identity-validation and profile requirements (USER-DM-DEC-011). Until this decision is approved, the model does not establish an unconditional guarantee that email is always present. If email is not required, the API contract must explicitly define how a missing email is represented.
+
+The proposed email constraint and the API's response guarantees must be consistent with the final approved decisions. No unresolved nullability decision is settled by this section.
 
 ### 4.6 Fields returnable by `GET /api/v1/users/me`
 | Field | Returnable | Label |
@@ -118,11 +125,11 @@ The API returns `customer.id`, `customer.name`, `customer.email` and defers requ
 |---|---|---|---|
 | Token record identifier | Unique, opaque identifier of the token record; safe to appear in events and logs. | Required | **[Proposed]** |
 | Session | The session this token belongs to. | Required | **[Proposed]** |
-| Token verifier | The stored, **non-reusable representation** of the refresh token used to recognize a presented token. The raw token is never stored. Form is undecided (see 8.2). | Required | **[Required]** property (USER-SEC-011); form **[Unresolved]** |
+| Token verifier | A representation or lookup mechanism that allows the system to recognize a presented refresh token without storing the raw token. The exact representation and mechanism remain unresolved and must satisfy USER-SEC-011 and USER-AC-029. Whether this is a dedicated stored field depends on the approved token strategy. | Required | **[Required]** property (USER-SEC-011); form **[Unresolved]** |
 | Issued timestamp | When the token was issued. | Required | **[Proposed]** |
 | Expiry timestamp | When the token stops being valid. Derived from the configured lifetime at issue time (default 7 days; USER-FR-071, 072); the configured value MUST NOT be hard-coded. | Required | **[Required]** behavior; storing the computed expiry is **[Proposed]** (so later configuration changes do not silently alter tokens already issued; **[Unresolved]** whether that is desired, USER-DM-DEC-005) |
-| Consumed timestamp | When the token was successfully used to obtain a new access token; null if not consumed. | Nullable | **[Required]** capability (USER-FR-081: a consumed token is not reusable); field **[Proposed]**; only used if rotation is adopted |
-| Successor | The token issued in exchange for this one. | Nullable | **[Proposed]**; only if rotation is adopted |
+| Consumed timestamp | When the token was successfully consumed; null if not consumed. | Nullable | The **outcome** that a consumed token is never reusable is **[Required]** (USER-FR-081). This field is a **[Proposed]** way to record consumption. What counts as "consumed" depends on the refresh strategy, which is **[Unresolved]** (USER-Q-001). |
+| Successor | The token issued in exchange for this one. | Nullable | **[Proposed]**, **conditional on rotation being approved**. Absent if rotation is not approved. |
 
 ### 5.3 Token validity (derived, not stored as a field)
 **[Required]** A presented refresh token MUST be accepted only if all of the following are true at the time of the request:
@@ -133,14 +140,39 @@ The API returns `customer.id`, `customer.name`, `customer.email` and defers requ
 
 If any condition fails, the request is rejected under USER-FR-076 with no disclosure of which condition failed. **A consumed refresh token MUST NOT be reusable successfully; the model provides no path by which a consumed token can be accepted.** **[Required]**
 
-### 5.4 Support for rotation and concurrency (conceptual; no strategy selected)
-**[Unresolved]** Rotation confirmation, reuse response, session-level revocation on reuse, lost-response recovery, benign-retry tolerance, and the concurrency mechanism all remain open (USER-Q-001; API-DEC-007). This section records only what the model must be able to represent.
+Presentation of an invalidated (consumed, revoked, or superseded) token MUST also be recorded as a security event, without logging the token (USER-FR-082). **[Required]** A revoked session MUST NOT be usable to refresh credentials (USER-FR-073, 077). **[Required]**
 
-What the model could support:
-- **Consumption recorded durably.** The consumed timestamp lets the system recognize a presented, previously consumed token and reject it (USER-FR-081), and treat it as a recorded security event (USER-FR-082).
-- **Single winner for concurrent requests (USER-FR-083, [Required] outcome).** The model needs a way for the transition "unconsumed → consumed" to occur at most once per token, atomically, so that two simultaneous requests cannot both succeed. Constraints on the data (for example, allowing at most one successor per token, section 6) prevent two successors from existing even if application logic fails. The *mechanism* (for example, a database-level atomic conditional update versus row locking) is a concurrency strategy and is **not selected here**.
-- **Session as the unit of revocation.** Revoking a session invalidates every token in it, which would be available if session-level revocation on reuse is later approved. Whether it is used is **not decided**.
-- **No grace period.** The model does not include a grace window and does not permit consumed-token reuse. Any retry or lost-response tolerance requires explicit security approval and a requirements update (api-contracts §6.2). **[Required]**
+These required outcomes apply to **any** refresh-token strategy, rotating or not.
+
+### 5.4 Support for rotation and concurrency (conceptual; no strategy selected)
+
+**[Unresolved]** Refresh-token rotation, reuse response, session-level revocation on reuse, lost-response recovery, benign-retry tolerance, and the concurrency mechanism remain open (USER-Q-001; API-DEC-007). This section specifies required outcomes without selecting a token strategy or implementation mechanism.
+
+**Required outcomes, regardless of the eventual strategy:**
+
+- A consumed refresh token cannot be reused successfully (USER-FR-081).
+- Concurrent refresh requests must not produce more than one successful use of the same token (USER-FR-083).
+- Presentation of an invalidated token must be recorded as a security event (USER-FR-082).
+- A revoked session cannot be used to refresh credentials (USER-FR-073, 077).
+- The token store must not yield usable refresh tokens if disclosed (USER-SEC-011; USER-AC-029).
+
+**Security-design dependency:**
+
+A reusable, non-rotating refresh token presents a potential conflict with the requirements that a consumed token cannot be reused and that concurrent requests cannot successfully use the same token more than once. If the token remains reusable, these requirements may not be satisfied. If it is permanently consumed after one successful use, the client needs an approved way to obtain a replacement before refreshing again.
+
+Therefore, a non-rotating design MUST NOT be approved merely because it validates the token's identity, expiry, and session status. Before implementation, the security design MUST demonstrate how the proposed strategy satisfies every approved refresh-token security requirement, including USER-FR-073, USER-FR-081, USER-FR-082, USER-FR-083, USER-SEC-011, and USER-AC-029.
+
+If no viable non-rotating strategy satisfies those requirements, the design review MUST document the limitation and propose an alternative for explicit approval. Rotation remains unresolved until that review is complete. This document does not select rotation or any alternative strategy.
+
+**What the model needs to represent:**
+
+- **Durable consumption state:** If the approved strategy uses single-use tokens, the system needs a durable way to recognize a previously consumed token, reject it, and record the required security event.
+- **Concurrency safety:** The transition that permits a token to be used successfully must be coordinated so that simultaneous requests cannot both succeed with the same token. The mechanism (for example, an atomic conditional update or row locking) is not selected here.
+- **Successor relationship:** If rotation is approved, the model may represent the relationship between a consumed token and its successor. A constraint allowing at most one successor is conditional on that decision. No successor chain is required if an alternative strategy is approved.
+- **Session revocation:** The model supports session-level revocation. Whether detecting reuse must revoke the entire session remains unresolved.
+- **Retries and lost responses:** The model does not authorize a grace period or successful reuse of a consumed token. Any retry or lost-response tolerance must be explicitly reviewed and approved, with the requirements updated if necessary.
+
+These are logical requirements and dependencies, not a selection of a physical schema or concurrency mechanism.
 
 ### 5.5 Security Event
 
@@ -165,8 +197,8 @@ Records occurrences that the requirements say must be recorded or reviewed.
 | Relationship | Cardinality | Label |
 |---|---|---|
 | Customer → Refresh Session | One customer has **zero or many** sessions; each session belongs to exactly one customer. | **[Proposed]**. The model does **not** limit a customer to one active session. Whether concurrent sessions are allowed is **[Unresolved]** (USER-Q-003). |
-| Refresh Session → Refresh Token | One session has one or many token records over time (one if rotation is not adopted; a chain if it is). Each token belongs to exactly one session. | **[Proposed]**; chain length **[Unresolved]** (USER-Q-001) |
-| Refresh Token → Successor | Each token has at most one successor. | **[Proposed]**; only if rotation is adopted |
+| Refresh Session → Refresh Token | A session manages the refresh-token state associated with that session. The logical model may represent this state using one or more token records, depending on the approved refresh-token strategy. A separate physical token table and a token chain are not mandatory. If token records are used, each belongs to exactly one session. A chain of tokens exists only if rotation is approved. | **[Proposed]**; chain length **[Unresolved]** (USER-Q-001) |
+| Refresh Token → Successor | Each token has at most one successor. | **[Proposed]**, **conditional on rotation being approved**; not applicable otherwise |
 | Customer / Session / Token → Security Event | An event may reference a customer, session, or token record; each reference is optional. | **[Proposed]** |
 
 ### 6.2 Keys and integrity
@@ -175,8 +207,8 @@ Records occurrences that the requirements say must be recorded or reviewed.
 | Each entity has a primary key (its identifier). | **[Proposed]**; for Customer, unique and immutable identifier is **[Required]** |
 | Session references Customer by a foreign key; a session cannot exist without an existing customer. | **[Proposed]** |
 | Token references Session by a foreign key; a token cannot exist without an existing session. | **[Proposed]** |
-| Successor references another Token record and is itself unique (at most one successor per token), so token chains cannot fork. | **[Proposed]** |
-| Security Event references are optional foreign keys that do not block retention-driven removal of other data (see section 9). | **[Proposed]**; behavior on removal **[Unresolved]** |
+| Successor references another Token record and is itself unique (at most one successor per token), so token chains cannot fork. | **[Proposed]**, **conditional on rotation being approved** |
+| Security Event may carry identifiers of a related customer, session, or token record, but retaining an event MUST NOT require retaining the corresponding session or token record indefinitely. Whether these are enforced foreign keys, plain recorded identifiers, or removed/anonymized on retention is not decided. | Independence **[Required for the proposal to be acceptable]**: see 8.4. Mechanism, referential actions, and anonymization/removal strategy **[Unresolved]** — USER-DM-DEC-007, 012 |
 | Customer Google account identifier is unique. | **[Required]** (USER-FR-010) |
 | Token verifier is unique across token records. | **[Proposed]** (a presented token must resolve to at most one record) |
 | Referential action when a customer is removed. | **[Unresolved]** — customer deletion is deferred (USER-DEC-011); no deletion behavior is defined or implied. Until decided, customers are not removed. |
@@ -197,7 +229,7 @@ All indexes are **[Proposed]** unless stated. Exact definitions belong to physic
 | Customer: primary key on identifier | Resolve identity from a validated access token for `GET /users/me`. |
 | Token: unique on token verifier | Look up a presented token at refresh and logout; enforces one record per verifier. |
 | Token: on session | Find all tokens in a session when revoking or inspecting a session. |
-| Token: unique on successor | Enforce at most one successor per token (concurrency safety; only if rotation is adopted). |
+| Token: unique on successor | Enforce at most one successor per token. **Conditional on rotation being approved**; not needed otherwise. |
 | Session: on customer | Find a customer's sessions (needed for any "all sessions" behavior if USER-Q-003 later requires it, and for referential integrity checks). |
 | Token / Session: on expiry (and revoked) | Support removal of expired or revoked records under a retention rule, once retention is decided. Deferred until retention is defined. |
 | Security Event: on occurred timestamp | Review recent events. |
@@ -236,6 +268,11 @@ No retention periods are set in this document. Nothing is deleted by the model.
 | Order-related retention obligations | **[Unresolved]**; Order history may need customer data to persist, so customer data MUST NOT be deleted on the assumption it is unneeded. Depends on the Order specification. |
 | Authentication-session retention (expired/revoked sessions and tokens) | **[Unresolved]** — USER-DM-DEC-007. Note: retaining consumed token records is what lets reuse be recognized as reuse; removing them earlier would reject the token as unknown but could not identify it as a reuse event. |
 | Security-event retention | **[Unresolved]** — USER-DM-DEC-007. |
+| Security-event references, referential actions, anonymization or removal | **[Unresolved]** — USER-DM-DEC-012, pending the privacy and retention review. |
+
+**Event retention is independent of token retention.** Retaining a security event MUST NOT require retaining the corresponding session or token record indefinitely, and removing a session or token record MUST NOT force removal of a security event that is still within its retention need. No retention periods are proposed. **[Required for the proposal to be acceptable]** Security events continue to exclude raw tokens, token verifiers, credentials, secrets, and unnecessary personal data. **[Required]** (USER-FR-028, USER-SEC-008)
+
+**Retention and recognition limitation:** The requirement to record presentation of an invalidated token must be implemented within the capabilities of the approved token strategy and retention policy. If the records or other information needed to recognize a previously invalidated token are removed, the system may be unable to distinguish that token from an unknown token. The security design and retention decision must explicitly address this limitation and ensure that the approved security requirements are not silently weakened. No retention period or recognition window is selected by this document.
 
 ## 9. Lifecycle Behavior
 
@@ -244,7 +281,7 @@ No retention periods are set in this document. Nothing is deleted by the model.
 | First successful Google sign-in (new Google account) | A Customer is created; a Session and a first Token are created. | **[Required]** outcome (USER-FR-004, 020); structure **[Proposed]** |
 | Repeat sign-in (same Google account) | The same Customer is resolved; no new Customer; name/email updated per 4.3; a new Session and Token are created. | **[Required]** (USER-FR-009, 010); name/email update **[Proposed]**; new session per sign-in **[Proposed]** |
 | Sign-in rejected (invalid credential, unverified email, conflict) | No Customer created, no Session or Token issued. A security event is recorded for conflicts. | **[Required]** (USER-FR-006, 007, 011) |
-| Successful refresh | If rotation is adopted: the presented Token is marked consumed and a successor is issued, atomically. If not: the Token is checked against validity only. | **[Unresolved]** (USER-Q-001) |
+| Successful refresh | Strategy **[Unresolved]** (USER-Q-001). *If rotation is approved:* the presented Token is marked consumed and a successor is issued, as a single atomic outcome. *If rotation is not approved:* the chosen strategy must still satisfy **every** approved refresh-token security requirement, including consumed-token rejection (USER-FR-081), concurrency safety (USER-FR-083), invalidated-token security events (USER-FR-082), and revoked-session rejection (USER-FR-073). It is **not** sufficient for a non-rotating design to check validity alone. If a non-rotating design cannot satisfy these requirements, the design review MUST identify the limitation and propose an alternative for explicit approval. No strategy is selected here. | **[Required]** requirements; strategy **[Unresolved]** |
 | Refresh with an invalid, expired, revoked, consumed, or unknown token | No access token issued; no state disclosed. Reuse of an invalidated token is recorded as a security event. Further effect (for example, revoking the whole session) is not decided. | **[Required]** (USER-FR-076, 082); extra effects **[Unresolved]** |
 | Logout (token recognized) | The session (or applicable token) is marked revoked. | **[Required]** (USER-FR-073) |
 | Logout (token missing, unrecognized, or already revoked) | No data change. | **[Proposed]**, consistent with API-DEC-008 (open) and api-contracts §6.3 |
@@ -287,9 +324,15 @@ All **Open**. Proposals are recommendations only.
 | USER-DM-DEC-004 | Refresh-token format, derivation/hashing/encryption, key management. | Not decided; must meet USER-SEC-011 and USER-AC-029. | USER-Q-001 |
 | USER-DM-DEC-005 | Absolute session lifetime versus per-token lifetime (with rotation, a session could otherwise extend indefinitely); whether expiry is stored or computed from configuration. | Not decided; the model can hold either. | USER-Q-001; USER-DEC-007 |
 | USER-DM-DEC-006 | Are security events stored in the database, a log, or both; full event-type list. | Database record proposed; needs confirmation. | Security design |
-| USER-DM-DEC-007 | Retention of expired/revoked sessions, consumed token records, and security events. | No periods proposed. | USER-PRE-001; USER-Q-001 |
+| USER-DM-DEC-007 | Retention of expired/revoked sessions, consumed token records, and security events (event retention independent of token retention). | No periods proposed. | USER-PRE-001; USER-Q-001 |
 | USER-DM-DEC-008 | Identifier format for Customer and records. | Randomly generated, non-guessable UUID. | Physical design |
 | USER-DM-DEC-009 | Referential behavior on customer removal. | None defined; customers not removed in first release. | USER-DEC-011; Order retention |
+| USER-DM-DEC-010 | How `GET /api/v1/users/me` represents a missing name: `name: null`, omission of the field, or another agreed contract. | Not selected. Any choice must be reflected in the API contract through its own review. | API contract §6.4 |
+| USER-DM-DEC-011 | Whether email is required (NOT NULL) in the Customer record. | Required, since sign-in needs a verified email; confirm against validation and profile requirements. | USER-FR-006; profile requirements |
+| USER-DM-DEC-012 | Security-event references (enforced links vs. recorded identifiers), referential actions, and anonymization or removal strategy. | None selected; event retention must not force indefinite token-record retention. | USER-PRE-001; USER-DM-DEC-007 |
+| USER-DM-DEC-013 | Whether rotation is approved, and, if not, which non-rotating strategy satisfies USER-FR-081–083. Session-level revocation on reuse and absolute session lifetime (DEC-005) remain with it. | None selected. | USER-Q-001 |
+
+USER-DM-DEC-002 stays open: email uniqueness and the exact identity-conflict scenarios are unresolved until API-DEC-013 is settled. No automatic account merging by email is introduced (USER-FR-047).
 
 **Carried-over unresolved items (not decided here):** rotation confirmation, reuse response, session-level revocation, concurrency mechanism and retry tolerance, lost-response recovery (USER-Q-001); multiple concurrent sessions and logout-from-all-devices (USER-Q-003); rate-limit state (USER-Q-002); guest-cart mechanism (USER-Q-006); pre-launch privacy review (USER-PRE-001).
 
@@ -299,24 +342,34 @@ All **Open**. Proposals are recommendations only.
 
 IDs use `USER-DM-AC-nnn`. Each is verifiable against the physical design.
 
-| ID | Criterion | Traces to |
-|---|---|---|
-| USER-DM-AC-001 | Customer has an immutable, unique identifier that is never reused. | USER-FR-040 |
-| USER-DM-AC-002 | At most one Customer exists per Google account identifier, enforced by a uniqueness constraint. | USER-FR-009, 010 |
-| USER-DM-AC-003 | Email is not the sole identity key and is not used to look up or merge identities. | USER-FR-005, 047 |
-| USER-DM-AC-004 | Changing name or email does not create a new Customer. | USER-FR-046 |
-| USER-DM-AC-005 | Only the approved customer fields (identifier, Google account identifier, name, email, created/updated timestamps) are stored. No other Google profile data is stored. | USER-FR-048; USER-DEC-010 |
-| USER-DM-AC-006 | The Customer data can supply `id`, `name`, and `email` for `GET /users/me`, and the Google account identifier is not exposed. Nullability of `name` is as decided under USER-DM-DEC-001. | USER-FR-042; api-contracts §6.4 |
-| USER-DM-AC-007 | Every Session belongs to an existing Customer; every Token belongs to an existing Session. | Relationships §6.1–6.2 |
-| USER-DM-AC-008 | A Customer can have more than one Session unless and until a decision (USER-Q-003) restricts this. | USER-Q-003 |
-| USER-DM-AC-009 | No raw refresh token is stored; the token store, if disclosed, yields no usable refresh token. | USER-SEC-011; USER-AC-029 |
-| USER-DM-AC-010 | Refresh-token expiry is derived from configuration, with a default of 7 days, and no lifetime is hard-coded. | USER-FR-071, 072 |
-| USER-DM-AC-011 | A token that is expired, belongs to a revoked session, or is consumed is never accepted. | USER-FR-076, 081 |
-| USER-DM-AC-012 | A consumed token cannot be successfully reused, and no grace period exists unless separately approved. | USER-FR-081; api-contracts §6.2 |
-| USER-DM-AC-013 | For concurrent refresh requests, at most one results in a consumed token and a single successor; no forked token chain can exist. *(Mechanism per the approved security design.)* | USER-FR-083; USER-AC-028 |
-| USER-DM-AC-014 | Logout of a recognized session records revocation; a revoked refresh token cannot obtain a new access token. | USER-FR-073; USER-AC-017 |
-| USER-DM-AC-015 | A failed revocation is never reported as success. | api-contracts §6.3 |
-| USER-DM-AC-016 | Security events exist for identity conflict and for reuse of an invalidated refresh token, and contain no tokens, verifiers, credentials, secrets, or unnecessary personal data. | USER-FR-011, 082; USER-SEC-008 |
-| USER-DM-AC-017 | No access-token records exist; logout does not claim to invalidate issued access tokens. | USER-FR-074, 084 |
-| USER-DM-AC-018 | The model contains no guest-cart, Cart, Checkout, Order, Payment, Delivery, or Feedback structures. | Scope §1 |
-| USER-DM-AC-019 | No data is deleted by default, and no retention period exists until decided. | USER-DEC-011; USER-PRE-001 |
+**Type column:** *Required* = behavior mandated by an approved specification. *Proposed structure* = depends on a proposed logical/physical choice, verifiable only once that choice is approved. *Conditional* = applies only if the stated decision is approved. No criterion assumes an unresolved decision has been made.
+
+| ID | Criterion | Type | Traces to |
+|---|---|---|---|
+| USER-DM-AC-001 | A customer has an immutable, unique identifier that is never reused. | Required | USER-FR-040 |
+| USER-DM-AC-002 | At most one customer exists per Google account identifier, and a uniqueness rule enforces it. | Required | USER-FR-009, 010 |
+| USER-DM-AC-003 | Email is not the sole identity key and is never used to look up or merge identities. | Required | USER-FR-005, 047 |
+| USER-DM-AC-004 | Changing name or email does not create a new customer. | Required | USER-FR-046 |
+| USER-DM-AC-005 | Only approved customer data is stored; no other Google profile data is stored. | Required (field list is Proposed structure) | USER-FR-048; USER-DEC-010 |
+| USER-DM-AC-006 | Customer data can supply `id`, `name`, and `email` for `GET /users/me`, and the Google account identifier is not exposed. The representation of a missing name must follow USER-DM-DEC-010. The API's email response guarantee must be consistent with the final resolution of USER-DM-DEC-011. | Required for the fields and identifier protection; nullability behavior depends on the relevant approved decisions. | USER-FR-042; api-contracts §6.4 |
+| USER-DM-AC-007 | A session cannot exist without a customer, and a token record cannot exist without a session. | Proposed structure | Section 6 |
+| USER-DM-AC-008 | A customer is not prohibited from having more than one session unless an approved decision restricts this. | Required (no restriction approved) | USER-Q-003 |
+| USER-DM-AC-009 | No raw refresh token is stored, and disclosure of the token store does not yield usable refresh tokens. The approved token representation and storage approach must demonstrate this property. | Required | USER-SEC-011; USER-AC-029 |
+| USER-DM-AC-010 | Refresh-token expiry is derived from configuration with a 7-day default, and no lifetime is hard-coded. | Required | USER-FR-071, 072 |
+| USER-DM-AC-011 | A token that is expired, whose session is revoked, or that is consumed is never accepted. | Required | USER-FR-073, 076, 081 |
+| USER-DM-AC-012 | A consumed refresh token cannot be reused successfully, and no grace period exists unless separately approved. This holds under any approved refresh strategy. | Required | USER-FR-081; api-contracts §6.2 |
+| USER-DM-AC-013 | Concurrent refresh requests do not produce more than one successful use of the same token, under any approved refresh strategy. The mechanism follows the approved security design. | Required | USER-FR-083; USER-AC-028 |
+| USER-DM-AC-014 | Presenting an invalidated (consumed, revoked, or superseded) refresh token is rejected and recorded as a security event. | Required | USER-FR-082; USER-AC-027 |
+| USER-DM-AC-015 | A revoked session cannot be used to refresh credentials. | Required | USER-FR-073, 077; USER-AC-017 |
+| USER-DM-AC-016 | Logout of a recognized session records revocation; a failed revocation is never reported as success. | Required | USER-FR-073; api-contracts §6.3 |
+| USER-DM-AC-017 | An identity conflict is recorded as a security event. | Required (the scenarios that constitute a conflict are Unresolved, USER-DM-DEC-002) | USER-FR-011, 066 |
+| USER-DM-AC-018 | Security events contain no raw tokens, token verifiers, credentials, secrets, or unnecessary personal data. | Required | USER-FR-028; USER-SEC-008 |
+| USER-DM-AC-019 | Retaining a security event does not require retaining the corresponding session or token record indefinitely. | Required for this proposal; mechanism Unresolved (USER-DM-DEC-012) | USER-DEC-011; USER-PRE-001 |
+| USER-DM-AC-020 | No access-token records exist, and logout does not claim to invalidate issued access tokens. | Required | USER-FR-074, 084 |
+| USER-DM-AC-021 | The model contains no guest-cart, Cart, Checkout, Order, Payment, Delivery, or Feedback structures. | Required (scope) | Section 1 |
+| USER-DM-AC-022 | No data is deleted by default and no retention period exists until decided. | Required | USER-DEC-011; USER-PRE-001 |
+| USER-DM-AC-023 | Before implementation, the approved refresh-token strategy must demonstrably satisfy every applicable approved security requirement, including session revocation, consumed-token rejection, invalidated-token event recording, concurrency safety, and protection against token-store disclosure. A non-rotating strategy must not be approved solely on the basis of token validation; its handling of single-use semantics and concurrent requests must be explicitly demonstrated. If no viable strategy satisfies these requirements, the design review must identify the limitation and obtain approval for an alternative before implementation. | Required | USER-FR-073, USER-FR-081–083; USER-SEC-011; USER-AC-029; USER-Q-001 |
+| USER-DM-AC-024 | **If rotation is approved:** a successful refresh results in the presented token being consumed and exactly one successor being issued as one atomic outcome. | Conditional on rotation approval | USER-FR-080, 081, 083 |
+| USER-DM-AC-025 | **If rotation is approved:** a token has at most one successor, so a token chain cannot fork. | Conditional on rotation approval | USER-FR-083 |
+| USER-DM-AC-026 | **If session-level revocation on reuse is approved:** presenting a consumed token revokes its session. | Conditional on that decision | USER-FR-082; USER-Q-001 |
+| USER-DM-AC-027 | **If an absolute session lifetime is approved:** a session cannot yield tokens beyond it. | Conditional on that decision | USER-DM-DEC-005 |
