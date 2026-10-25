@@ -14,18 +14,21 @@ Keyword usage follows the requirements: MUST / SHOULD / MAY.
 
 ## 1. Proposed Endpoint Inventory
 
+**Status update (Step 5e).** The inventory now has **five** endpoints: endpoint 5 was added by the approved nonce design (§11.1; API-DEC-015, approved under delegation in §13). The statuses in §9 are the original draft; current statuses are in §10.1, §12 and §13.
+
 | # | Method and path | Purpose | Access category (proposed) |
 |---|---|---|---|
 | 1 | `POST /api/v1/auth/google` | Google sign-up / sign-in; issue application credentials | Public (credential-based; the caller is a guest until it succeeds) |
 | 2 | `POST /api/v1/auth/refresh` | Obtain a new access token using a refresh token | Public (credential-based; presents a refresh token, not an access token) |
 | 3 | `POST /api/v1/auth/logout` | Revoke the current refresh token or session | Public (credential-based; presents a refresh token) |
 | 4 | `GET /api/v1/users/me` | Return the authenticated customer's permitted profile | Authenticated-only |
+| 5 | `POST /api/v1/auth/google/nonce` | Issue a single-use sign-in nonce (added by §11.1) | Public (credential-based; no access token, no cookie) |
 
-No additional endpoints are proposed. Two were considered and **not** proposed:
+No endpoint beyond the five above is proposed. Two were considered and **not** proposed:
 - *Logout from all devices* — depends on USER-Q-003, which is unresolved.
 - *A Google OAuth redirect/callback endpoint* — only needed if the authorization-code flow is chosen over the ID-token flow (API-DEC-001).
 
-**Classification note.** Requirements define three categories: public, guest-accessible, authenticated-only. Endpoints 1–3 are not tied to a guest's own resources and do not require an access token, so they are listed as *public*; their own credential (Google credential or refresh token) is what is validated. Whether this labelling is acceptable is API-DEC-009.
+**Classification note.** Requirements define three categories: public, guest-accessible, authenticated-only. Endpoints 1–3 and 5 are not tied to a guest's own resources and do not require an access token, so they are listed as *public*; their own credential (Google credential or refresh token) is what is validated. This labelling is approved under API-DEC-009 (§13).
 
 ## 2. Conventions (Proposed)
 
@@ -44,7 +47,12 @@ No additional endpoints are proposed. Two were considered and **not** proposed:
 | `Accept: application/json` | all | SHOULD be sent. |
 | `Authorization: Bearer <accessToken>` | endpoint 4 | Required. Exactly one `Bearer` credential. |
 | `Cookie` (refresh token) | endpoints 2, 3 | Only under the proposed cookie transport (§5). |
+| `Origin` | endpoints 2, 3 | Set by the browser; exact match required; missing is rejected (§11). Added Step 5b. |
+| `X-CSRF-Protection` | endpoints 2, 3 | Carries the session-scoped CSRF token; failure returns `403 REQUEST_REJECTED` (§11). Added Step 5b. |
+| `Content-Type: application/json` | endpoint 5 (nonce) | Body carries the binder hash (§11). |
 | `X-Request-Id` | all | OPTIONAL client-supplied correlation id; the server MAY generate one. Never carries secrets. |
+
+*Note (Step 5f):* the `customer.name` examples in §6.1 and §6.4 show a string for illustration; `name` is nullable and is `null` (key present) when unavailable (§12.2). The status text in the §9 decision table is the original draft; the "Now" notes and §11, §13 give the current status.
 
 ### 2.3 Access token response shape
 Used by endpoints 1 and 2:
@@ -95,24 +103,25 @@ Rate-limit responses SHOULD include a `Retry-After` header. The same error forma
 |---|---|---|---|
 | Body missing, not JSON, wrong type, field missing/too long | 400 | `VALIDATION_FAILED` | USER-SEC-005 |
 | Google credential invalid, expired, rejected, wrong audience/issuer | 401 | `AUTH_GOOGLE_FAILED` | USER-FR-007, 061 |
-| Google identity with unverified email | 401 | `AUTH_GOOGLE_FAILED` (same generic code; see API-DEC-004) | USER-FR-006, 069 |
+| Google identity with unverified email | 401 | `AUTH_GOOGLE_FAILED` (same generic code; API-DEC-004 approved, Step 5f) | USER-FR-006, 069 |
 | Customer cancelled Google flow | *No API call is made.* The client remains a guest. | — | USER-FR-008 |
 | Identity conflict | 409 | `AUTH_IDENTITY_CONFLICT` | USER-FR-011, 066 |
 | Access token missing | 401 | `AUTH_ACCESS_TOKEN_MISSING` | USER-FR-062 |
 | Authorization header malformed | 401 | `AUTH_ACCESS_TOKEN_MISSING` (treated as missing, per USER-FR-025) | USER-FR-025, 063 |
-| Access token invalid, bad signature, or expired | 401 | `AUTH_ACCESS_TOKEN_INVALID` (expiry MAY use `AUTH_ACCESS_TOKEN_EXPIRED`; API-DEC-005) | USER-FR-022, 064 |
+| Access token invalid, bad signature, or expired | 401 | `AUTH_ACCESS_TOKEN_INVALID` (expiry uses `AUTH_ACCESS_TOKEN_EXPIRED`; API-DEC-005 approved in §13) | USER-FR-022, 064 |
 | Customer identity cannot be resolved from a valid token | 401 | `AUTH_ACCESS_TOKEN_INVALID` | USER-FR-065 |
 | Refresh token missing, malformed, invalid, unknown, expired, revoked, consumed | 401 | `AUTH_REFRESH_TOKEN_INVALID` (one generic code; reason not disclosed) | USER-FR-076, 077, 082 |
 | Authenticated but not permitted to the resource | 403 | `AUTH_FORBIDDEN` | USER-FR-067 |
 | Too many failed or abusive attempts | 429 | `RATE_LIMITED` | USER-SEC-009, USER-FR-078 |
 | Google service or other dependency unavailable | 503 | `SERVICE_UNAVAILABLE` | Requirements §7 (safe failure, never a granted session) |
 | Unexpected server error | 500 | `INTERNAL_ERROR` | USER-FR-068 |
+| Cookie-authenticated request fails the Origin, header or CSRF-token check | 403 | `REQUEST_REJECTED` | USER-SEC-015 (§11.4, §11.5) |
 
 Notes:
 - **401 vs 403.** `401` means authentication failed or is missing (the caller's identity is not established). `403` means the caller is authenticated but not permitted. These are not interchangeable and are not merged.
 - 401 responses for protected operations SHOULD include a `WWW-Authenticate: Bearer` header.
 - Missing/malformed/invalid refresh tokens deliberately share one code and a generic message so the response does not reveal why (USER-FR-076, 082).
-- **Expired-token code.** If a distinct `AUTH_ACCESS_TOKEN_EXPIRED` is approved (API-DEC-005, open), it is only a different error code for a request that has already been rejected by normal token validation. It does not bypass, relax, or replace validation, and an expired token is never accepted.
+- **Expired-token code.** `AUTH_ACCESS_TOKEN_EXPIRED` is approved (API-DEC-005, §13). It is only a different error code for a request already rejected by normal token validation. It does not bypass, relax, or replace validation, and an expired token is never accepted.
 - `AUTH_FORBIDDEN` is included for completeness (USER-FR-067). `GET /users/me` returns only the caller's own data, so it does not itself produce 403.
 
 ## 5. Token Transmission Proposal (USER-Q-004 — **not approved**)
@@ -163,6 +172,8 @@ Endpoints 2 and 3 are written for the **proposed cookie transport**. If the body
 | Required credentials | A Google credential in the request body. No access token. |
 | Request headers | `Content-Type: application/json`, `Accept: application/json` |
 
+> **Updated (§11.2, §12, §13):** the request also carries `binder`; the response also carries `csrfToken`; unknown request fields are rejected; an identity conflict returns `409` (§12.3).
+
 **Request body**
 ```json
 {
@@ -172,7 +183,7 @@ Endpoints 2 and 3 are written for the **proposed cookie transport**. If the body
 - `credential`: the Google identity credential produced by Google sign-in on the client. The **ID-token flow is the recommended proposal** and is used here for illustration.
 - **The request schema cannot be finalized until the frontend authentication flow is confirmed** (API-DEC-001, open). The frontend flow is not established in the repository. If the confirmed flow requires something other than an ID token (for example an authorization code), the request field(s) will change. An authorization-code callback endpoint is **not** added unless the chosen flow requires it.
 
-**Success — `200 OK`** (proposed; `201 Created` for first sign-up is an alternative, see API-DEC-006)
+**Success — `200 OK`** (approved under API-DEC-006, §13: `200` for new and returning customers; the `201` alternative is not used)
 
 Headers (cookie transport proposal): `Set-Cookie: <refresh-token cookie, attributes undecided>`; `Cache-Control: no-store`.
 ```json
@@ -213,7 +224,7 @@ The refresh token is not in the body under the cookie proposal. The `customer` f
 No credential, token, Google error detail, or account information is returned.
 
 **Validation rules**
-- Body MUST be a JSON object with a non-empty string `credential` within a maximum length (value set in design). Unknown fields SHOULD be rejected or ignored (API-DEC-010).
+- Body MUST be a JSON object with a non-empty string `credential` and a `binder`, each within a maximum length (provisional values in §14.2). **Unknown fields are rejected** (API-DEC-010, approved in §13).
 - Server-side verification MUST confirm authenticity, issuer, intended audience, and expiry (USER-SEC-001), and MUST check that Google reports the email as verified (USER-FR-006).
 - The identity key is the stable Google account identifier; email is not the sole key (USER-FR-005). A changed name or email MUST NOT create a new customer (USER-FR-046), and accounts MUST NOT be merged by email alone (USER-FR-047).
 - On failure, no customer is created and no credentials are issued (USER-FR-007, 008).
@@ -239,7 +250,7 @@ No credential, token, Google error detail, or account information is returned.
 | Method / path | `POST /api/v1/auth/refresh` |
 | Access category | Public (credential-based; no access token required) |
 | Required credentials | A valid refresh token (cookie under the proposed transport) |
-| Request headers | `Accept: application/json`; `Cookie` carrying the refresh token; plus any CSRF header if the cookie option is adopted (API-DEC-003) |
+| Request headers | `Accept: application/json`; `Cookie` carrying the refresh token; plus `Origin` and `X-CSRF-Protection` under the approved CSRF baseline (§11.4) (API-DEC-003) |
 | Request body | None under the cookie proposal. |
 
 **Success — `200 OK`**
@@ -309,7 +320,7 @@ The response MUST NOT reveal whether the token was expired, revoked, consumed, o
 | Method / path | `POST /api/v1/auth/logout` |
 | Access category | Public (credential-based; identifies the session by its refresh token) |
 | Required credentials | The refresh token for the current session (cookie under the proposed transport). An access token is **not** required, since it may already have expired. |
-| Request headers | `Accept: application/json`; `Cookie` carrying the refresh token; plus any CSRF header if the cookie option is adopted |
+| Request headers | `Accept: application/json`; `Cookie` carrying the refresh token; plus `Origin` and `X-CSRF-Protection` under the approved CSRF baseline (§11.4) |
 | Request body | None under the cookie proposal. |
 
 **Success — `204 No Content`** (proposed)
@@ -322,7 +333,7 @@ Headers (cookie transport): a `Set-Cookie` that clears the refresh-token cookie.
 
 **A missing refresh token does not identify a session.** If the request carries no refresh token, the service has no session to revoke, and **no server-side revocation takes place**. The response is still `204` (proposed) so that client-side logout can complete; `204` in that case means "nothing to revoke", not "a session was revoked".
 
-**Idempotency (proposed, API-DEC-008; open).** Logout with an invalid, expired, unrecognized, or already revoked refresh token also returns `204`, so repeated or stale logouts do not fail and do not reveal token state (USER-SEC-006). An alternative is a `401` for these cases.
+**Idempotency (approved under API-DEC-008, §13).** Logout with a missing, invalid, expired, unrecognized, or already revoked refresh token also returns `204`, so repeated or stale logouts do not fail and do not reveal token state (USER-SEC-006). If a recognized session cannot be revoked because of a dependency failure the response is `503`. The `401` alternative is not used.
 
 **Dependency failure.** If a refresh token or session was recognized but the revocation **could not be completed** because a dependency failed, the service MUST NOT return success; it returns `503` (below). The client still clears its local state, and may retry the server-side logout.
 
@@ -426,7 +437,7 @@ Fields are limited to those needed by approved functionality (USER-DEC-010, USER
 - **Generic failures.** Distinct internal causes are not revealed through status or message beyond the proposed codes (USER-SEC-006).
 - **Server-side verification** of Google credentials and access tokens on every relevant request (USER-SEC-001, 002).
 - **Identity from the server only.** The only source of customer identity for authorization is the validated access token (USER-FR-053).
-- **Abuse protection.** Endpoints 1–3 (and 4) are subject to rate limiting; thresholds and scope are USER-Q-002. Rate-limit responses are generic and reveal no account information (USER-SEC-009).
+- **Abuse protection.** Endpoints 1–3, the nonce endpoint and (optionally) 4 are subject to rate limiting; thresholds and scope are USER-Q-002. Rate-limit responses are generic and reveal no account information (USER-SEC-009).
 - **Transport.** HTTPS only in production (USER-SEC-010).
 - **Refresh-token lifecycle.** Required behaviors are in §6.2; unresolved design details are in USER-Q-001.
 - **Access-token lifetime limitation.** Logout does not necessarily invalidate access tokens already issued (§6.3; USER-SEC-012). The security design must document this.
@@ -448,11 +459,11 @@ Fields are limited to those needed by approved functionality (USER-DEC-010, USER
 ### 8.2 Flagged: requirements that this API cannot cleanly represent or that need further definition
 These are flagged, and the requirements are **not** changed.
 1. **Guest-cart merge on sign-in (USER-FR-034, USER-AC-022).** `POST /auth/google` as drafted does not accept or reference a guest cart, and the Cart mechanism is undefined (USER-Q-006). The API contract does not decide how the merge is triggered (for example, within sign-in, or by a separate Cart call after sign-in). Cart owns guest-cart identification, merge triggering, and merge behavior, and Integration (domain 08) must verify the complete guest sign-in and cart-merge journey. API-DEC-012 remains open until the Cart specification defines the mechanism, and it needs a decision before the sign-in contract is finalized.
-2. **Identity conflict (USER-FR-011, 066).** The requirements do not define what a conflict is in concrete terms. Because email is not a unique key, it is unclear whether two distinct Google accounts with the same email is a conflict, a permitted case, or neither. The `409` response is provided but the trigger cases need definition (API-DEC-013).
-3. **Generic failure for unverified email (USER-FR-069).** The requirement says a generic failure. A distinct, helpful message would conflict with it, so the proposal uses the generic `AUTH_GOOGLE_FAILED`. See API-DEC-004.
+2. **Identity conflict (USER-FR-011, 066).** The requirements do not define what a conflict is in concrete terms. Because email is not a unique key, it is unclear whether two distinct Google accounts with the same email is a conflict, a permitted case, or neither. The `409` response is provided but the trigger cases need definition (API-DEC-013). **Resolved:** API-DEC-013 is approved (§12.3).
+3. **Generic failure for unverified email (USER-FR-069).** The requirement says a generic failure. A distinct, helpful message would conflict with it, so the contract uses the generic `AUTH_GOOGLE_FAILED` (API-DEC-004, **Approved**, Step 5f).
 4. **Distinguishing guests on every request (USER-FR-030).** This is a cross-cutting behavior for all domains' operations, not an endpoint of this domain. It is not represented as an endpoint here and is left to the shared authorization approach in design.
-5. **Logout without an access token.** The requirement does not say whether logout needs a valid access token. The proposal avoids requiring it (§6.3), and this needs confirmation (API-DEC-009, 008). Related: with no refresh token presented there is no session to revoke, so `204` in that case does not mean a revocation occurred (§6.3).
-6. **Status of the requirements document.** The header of requirements.md still reads "Ready for final approval — not yet approved for implementation", while this task states that it has been approved for implementation planning. This document was drafted on that instruction, and requirements.md was not modified. The header should be updated by the project owner when appropriate.
+5. **Logout without an access token.** Resolved: logout does not require an access token (API-DEC-009 and API-DEC-008, §13). With no refresh token presented there is no session to revoke, so `204` in that case does not mean a revocation occurred (§6.3).
+6. **Status of the requirements document.** The header of requirements.md still reads "Ready for final approval — not yet approved for implementation", while this task states that it has been approved for implementation planning. This document was drafted on that instruction, and requirements.md was not modified. **Resolved:** the requirements header now reads "Approved for implementation planning".
 
 ### 8.3 Open questions and assumptions
 | ID | Item |
@@ -466,25 +477,25 @@ These are flagged, and the requirements are **not** changed.
 
 ## 9. Decisions Requiring Project Owner Approval
 
-All Status: **Open**. Proposals are recommendations only.
+This table is the **original draft**, when all of these were Open. **Current statuses are in §10.1, §12 and §13.** The "Now" notes below were added in Step 5e. Nothing here is implemented.
 
 | ID | Decision | Proposal in this draft |
 |---|---|---|
 | API-DEC-001 | Google credential type and frontend authentication flow: ID token in the body, or an authorization-code (redirect/callback) flow. The request schema cannot be finalized until this is confirmed. | ID token in a JSON body field `credential` (recommended). No callback endpoint unless the chosen flow requires one. |
 | API-DEC-002 | Refresh-token transport (resolves USER-Q-004): `HttpOnly` cookie, response body, or other; and the supported client types. | `Secure`, `HttpOnly` cookie. Needs deployment and client information. |
 | API-DEC-003 | If cookies are used: cookie attributes (`SameSite`, `Path`, name), CORS policy, CSRF mitigation, and the status code for a failed CSRF check. | Not finalized; depends on API-DEC-002 and deployment origins. |
-| API-DEC-004 | Whether an unverified email gets a distinct error code or the same generic `AUTH_GOOGLE_FAILED`. | Same generic code, consistent with USER-FR-069. |
-| API-DEC-005 | Whether an expired access token is distinguishable (`AUTH_ACCESS_TOKEN_EXPIRED`) so clients can refresh. | Distinguishable (permitted by USER-FR-064). |
-| API-DEC-006 | Success status for first sign-up: `200` always, or `201` for newly created customers. | `200` always, so the response does not reveal whether the account is new. |
+| API-DEC-004 | Whether an unverified email gets a distinct error code or the same generic `AUTH_GOOGLE_FAILED`. | Same generic code, consistent with USER-FR-069. **Now: Approved (owner, Step 5f).** |
+| API-DEC-005 | Whether an expired access token is distinguishable (`AUTH_ACCESS_TOKEN_EXPIRED`) so clients can refresh. | Distinguishable (permitted by USER-FR-064). **Now: Approved (delegated), §13.** |
+| API-DEC-006 | Success status for first sign-up: `200` always, or `201` for newly created customers. | `200` always, so the response does not reveal whether the account is new. **Now: Approved (delegated), §13.** |
 | API-DEC-007 | Response for the losing request in a concurrent refresh, and tolerance for benign retries. | `401 AUTH_REFRESH_TOKEN_INVALID`; tolerance left to USER-Q-001. |
-| API-DEC-008 | Logout with a missing, invalid, unrecognized, or already revoked refresh token: `204` (idempotent) or `401`. A dependency failure while revoking a recognized session is always non-success (`503`). | `204` for the former; `503` for dependency failure. |
-| API-DEC-009 | The access-category label for endpoints 1–3 (public, credential-based), and that logout does not require an access token. | As drafted. |
-| API-DEC-010 | Handling of unknown request fields (reject or ignore) and maximum field sizes. | Decide in design. |
-| API-DEC-011 | Profile fields returned by `GET /users/me`. | `id`, `name`, `email`. |
-| API-DEC-012 | How guest-cart merge is triggered relative to sign-in (see §8.2 item 1). Cart owns identification, triggering, and merge behavior; Integration verifies the full journey. | **Open** until the Cart specification defines the mechanism. No cart endpoint or guest-cart identifier is proposed here. |
-| API-DEC-013 | Definition of the identity-conflict scenarios that produce `409`. | Not defined; needs input. |
-| API-DEC-014 | Approval of the shared error envelope (§3) and the status/error-code table (§4). | As drafted. |
-| API-DEC-015 | Approval of the four-endpoint inventory, and that logout-from-all-devices is excluded pending USER-Q-003. | As drafted. |
+| API-DEC-008 | Logout with a missing, invalid, unrecognized, or already revoked refresh token: `204` (idempotent) or `401`. A dependency failure while revoking a recognized session is always non-success (`503`). | `204` for the former; `503` for dependency failure. **Now: Approved (delegated), §13.** |
+| API-DEC-009 | The access-category label for endpoints 1–3 (public, credential-based), and that logout does not require an access token. | As drafted. **Now: Approved (delegated), §13.** |
+| API-DEC-010 | Handling of unknown request fields (reject or ignore) and maximum field sizes. | Decide in design. **Now: Approved (delegated), §13.** |
+| API-DEC-011 | Profile fields returned by `GET /users/me`. | `id`, `name`, `email`. **Now: Approved, §12.** |
+| API-DEC-012 | How guest-cart merge is triggered relative to sign-in (see §8.2 item 1). Cart owns identification, triggering, and merge behavior; Integration verifies the full journey. | **Open** until the Cart specification defines the mechanism. No cart endpoint or guest-cart identifier is proposed here. **Step 5f:** a separate post-sign-in Cart API call is the preferred option being evaluated; not finalized. |
+| API-DEC-013 | Definition of the identity-conflict scenarios that produce `409`. | Not defined; needs input. **Now: Approved, §12.** |
+| API-DEC-014 | Approval of the shared error envelope (§3) and the status/error-code table (§4). | As drafted. **Now: Approved (delegated), §13.** |
+| API-DEC-015 | Approval of the four-endpoint inventory, and that logout-from-all-devices is excluded pending USER-Q-003. | As drafted. **Now: Approved (delegated), §13.** |
 
 Related items still held by other steps: USER-Q-001 (refresh-token format, storage, rotation confirmation, reuse response, concurrency, retry tolerance), USER-Q-002 (rate-limit thresholds), USER-Q-003 (concurrent sessions, logout-all), USER-Q-005 (operation lists), USER-Q-006 (guest cart mechanism), USER-Q-008 (data model).
 
@@ -498,12 +509,14 @@ Decisions approved by the project owner that affect these contracts. Full detail
 | API-DEC-001 | **Approved (conditional)** | Google ID-token flow with a server-issued, single-use nonce, five-minute lifetime (USER-SD-DEC-001, in principle). Documented in §11.1 and §11.2 for final review. |
 | API-DEC-002 | **Approved (conditional)** | Refresh-token transport (USER-SD-DEC-013): `Secure`, `HttpOnly` refresh cookie and in-memory access token. **Profile X (current Render origins) and Profile Y (custom domains or proxy) are alternatives; no production profile is selected** until feasibility is verified (§11.3). |
 | API-DEC-003 | **Approved** | CORS allow-list principle and CSRF baseline: `X-CSRF-Protection`, `403 REQUEST_REJECTED`, Origin validation, missing `Origin` rejected on refresh and logout, session CSRF token (USER-SD-DEC-015, 016, 028). Cookie attributes per profile (§11.3) remain conditional. |
-| API-DEC-004 | Open | Unchanged |
-| API-DEC-005 | Open | Unchanged |
-| API-DEC-006 | Open | Unchanged |
+| API-DEC-004 | **Approved (owner, Step 5f)** | An unverified Google email returns the generic `401 AUTH_GOOGLE_FAILED` (USER-FR-006, 069); no distinct code. |
+| API-DEC-005 | **Approved (delegated)** | See §13 |
+| API-DEC-006 | **Approved (delegated)** | See §13 |
 | API-DEC-007 | **Approved** | The losing request in a concurrent refresh returns the generic `401 AUTH_REFRESH_TOKEN_INVALID` (USER-SD-DEC-007). Benign retries are not tolerated (USER-SD-DEC-009). |
-| API-DEC-008 | Open | `204` versus `401` for logout with a stale or unknown token is unchanged. Approved: logout revokes the applicable refresh session; a revocation that cannot be persisted is never reported as success (USER-SD-DEC-012). |
-| API-DEC-009 to 015 | Open | Unchanged, except API-DEC-015: the inventory is now documented with **five** endpoints (§11.5), pending final approval. API-DEC-012 (guest-cart merge) stays with the Cart specification. |
+| API-DEC-008 | **Approved (delegated)** | See §13: idempotent `204`; `503` if a recognized session cannot be revoked. Revocation approved earlier (USER-SD-DEC-012). |
+| API-DEC-009, 010, 014, 015 | **Approved (delegated)** | See §13. The inventory has five endpoints (§1, §11.5). |
+| API-DEC-011, 013 | **Approved** | See §12 |
+| API-DEC-012 | Open | Stays with the Cart specification. Step 5f: a **separate post-sign-in Cart API call is the preferred option under evaluation, not decided**; no guest-cart identifier, cart endpoint or sign-in field is defined (§8.2 item 1). It needs the Cart specification to define guest-cart identification, ownership, merge triggering and merge behavior. |
 
 ### 10.2 Contract behavior now approved
 - `POST /auth/refresh` is a strict single-use rotation: each success consumes the presented token and returns a replacement (USER-SD-DEC-004).
@@ -515,10 +528,10 @@ Decisions approved by the project owner that affect these contracts. Full detail
 - A refresh attempted at or after the session's absolute expiry (90 days after sign-in, USER-SD-DEC-010) returns the generic refresh error and the customer signs in again. Refreshing never extends the session, and a successor token's expiry never exceeds the session's absolute expiry. This adds no field and no endpoint.
 
 ### 10.3 Still open and affecting the contracts
-Sign-in request schema (API-DEC-001), refresh-token transport and cookie behavior (API-DEC-002, 003; note that §5's cookie proposal was written before the confirmed origins were found to be cross-site), logout status for stale tokens (API-DEC-008), the status code for a failed CSRF check, and whether a nonce endpoint or callback endpoint is added (neither is approved).
+Superseded by §11.6 and §13. The current open items are: API-DEC-012 (API-DEC-004 was approved in Step 5f), the production cookie profile, and the numeric request-size limits (PROVISIONAL, §14.2).
 
-### 10.4 Contract changes the server-issued nonce would require (NOT approved)
-The recommendation for decision USER-SD-DEC-001 is the Google ID-token flow with a server-issued, single-use nonce. It is **not approved**, and **nothing in §1 to §9 has been changed**. If you approve it, the contract would change as follows, for review before any implementation.
+### 10.4 Contract changes the server-issued nonce would require (original proposal; superseded by §11.1 and §11.2)
+The nonce flow is **approved in principle** (USER-SD-DEC-001). This section is the original proposal and is **superseded by §11.1 and §11.2**, which govern.
 
 | Item | Proposed change |
 |---|---|
@@ -605,10 +618,10 @@ Extends the §4 mapping:
 |---|---|---|
 | Cookie-authenticated request fails the Origin, header or CSRF-token check | 403 | `REQUEST_REJECTED` |
 
-**Endpoint inventory (API-DEC-015, pending final approval):** `POST /auth/google/nonce` (new), `POST /auth/google`, `POST /auth/refresh`, `POST /auth/logout`, `GET /users/me`. No logout-all endpoint.
+**Endpoint inventory (API-DEC-015, approved under delegation, §13):** `POST /auth/google/nonce` (new), `POST /auth/google`, `POST /auth/refresh`, `POST /auth/logout`, `GET /users/me`. No logout-all endpoint.
 
 ### 11.6 Still open and affecting the contract
-Sign-in request and response schema final review (API-DEC-001); the unverified-email code, expired-token code, 200 versus 201 and logout status for stale tokens (API-DEC-004 to 008); access categories, field limits, profile fields, identity-conflict triggers and the error-envelope approval (API-DEC-009 to 014); which profile is used in production.
+Final review of the sign-in schema (API-DEC-001, approved in principle); which cookie profile is used in production; the numeric request-size limits (PROVISIONAL — NOT VERIFIED, §14.2).
 
 ## 12. Identity, Profile and Conflict Contract (Step 5c, 2026-10-25)
 Records the contract effect of the owner decisions in data-model §15. Where §6 and this section differ, this section governs.
@@ -633,6 +646,8 @@ When the validated subject is unknown and the case-insensitive email is held by 
 ```
 with HTTP `409`. No customer is created, no session or token is issued, nothing is merged, and the response does not reveal the other account. The mandatory identity-conflict event is recorded. The frontend treats it as non-retryable.
 
+**Existing subject whose Google email now collides.** When the validated subject already identifies a customer and the case-insensitive email Google now reports is held by **another** customer, `POST /api/v1/auth/google` **succeeds for the correctly identified customer**. The stored email is **kept unchanged and not updated**, nothing is merged, another customer's email is never overwritten, and the database uniqueness constraint is never bypassed. A conflict event is recorded (`AUTH_IDENTITY_CONFLICT` with a distinct reason code, never the email address). If the event cannot be stored, the sign-in still succeeds and the failure is detected independently (requirements §12.10). The response returns the stored, unchanged email. No `409` is returned in this case (data-model §15.4, `USER-DM-AC-039`; `USER-FR-088`; `USER-AC-042`).
+
 ## 13. Decisions Taken Under Owner Delegation (Step 5d, 2026-10-25)
 The project owner asked for the open decisions to be decided. Each is recorded as **Approved (delegated)**: decided by the assistant under that delegation, with the reasoning below. **The owner may override any of them.** None changes an earlier approved decision.
 
@@ -646,3 +661,35 @@ The project owner asked for the open decisions to be decided. Each is recorded a
 | API-DEC-014 | The shared error envelope is approved as drafted (`code`, `message`, `requestId`, optional `details`). **`requestId` is generated by the server;** a client-supplied value is ignored. `REQUEST_REJECTED` is added to the code table. | Prevents log injection |
 | API-DEC-015 | The inventory is **five endpoints**: the nonce endpoint, sign-in, refresh, logout, `GET /users/me`. No logout-all endpoint. | Follows the approved nonce design |
 `API-DEC-011` and `API-DEC-013` are resolved (§12). `API-DEC-012` (guest-cart merge) stays with the Cart specification.
+
+## 14. Traceability and Request-Size Limits (Step 5e, 2026-10-25)
+Specification status only. **Nothing here is implemented.**
+
+### 14.1 Traceability
+| Contract element | Requirements | Acceptance criteria | Decisions |
+|---|---|---|---|
+| `POST /auth/google/nonce` (§11.1) | USER-FR-087, USER-SEC-014, USER-SEC-009 | USER-AC-031, 032, 033, 039 | USER-SD-DEC-001, 027; API-DEC-015 |
+| `POST /auth/google` (§6.1, §11.2, §12.3) | USER-FR-001 to 011, USER-SEC-001, 014 | USER-AC-001, 002, 003, 011, 013, 023, 031 | API-DEC-001, 004, 006, 010, 011, 013 |
+| `POST /auth/refresh` (§6.2, §11.4) | USER-FR-070 to 083, USER-SEC-011, 015 | USER-AC-015, 016, 026 to 029, 034, 035, 036 | USER-SD-DEC-004, 007, 008, 016, 028 |
+| `POST /auth/logout` (§6.3, §11.4) | USER-FR-027, 073, 074, 084, 085, USER-SEC-015 | USER-AC-017, 018, 034, 035 | API-DEC-008; USER-SD-DEC-012 |
+| `GET /users/me` (§6.4, §12.2) | USER-FR-042, 051 to 054 | USER-AC-004 to 007 | API-DEC-011 |
+| Error envelope (§3, §4) | USER-SEC-006, USER-FR-068 | USER-AC-008, 010 | API-DEC-005, 014 |
+| Existing-subject email collision and conflict `409` (§12.3) | USER-FR-088, 011, 066 | USER-AC-042, 013 | API-DEC-013 |
+| Event persistence and logging (cross-cutting) | USER-SEC-017, 018 | USER-AC-040, 041 | USER-SD-DEC-024 |
+| Database exposure (not an endpoint) | USER-SEC-016 | USER-AC-037, 038 | USER-SD-DEC-025, 026 |
+
+### 14.2 Request-size limits: **PROVISIONAL — NOT VERIFIED**
+These are **proposed defaults, not approved production limits.** No measurement of real Google ID-token sizes has been performed, and no limit has been confirmed against legitimate requests.
+| Item | Provisional default | Status |
+|---|---|---|
+| Authentication JSON body cap | 8 KB | PROVISIONAL — NOT VERIFIED |
+| `credential` field | 4 KB (interim) | PROVISIONAL — NOT VERIFIED |
+| `binder`, `binderHash`, `nonce` fields | Bounded to a few hundred characters each | PROVISIONAL — NOT VERIFIED |
+| Cookie-authenticated endpoints (refresh, logout) | No body expected; a non-empty body is rejected | PROVISIONAL |
+**Before these are final:** (1) inspect the actual request format and validation rules; (2) measure representative Google ID-token sizes in the intended flow; (3) confirm the limits leave reasonable headroom for legitimate requests; (4) confirm oversized requests are rejected with `413` or `400`; (5) confirm limits are enforced before expensive parsing or authentication work where feasible; (6) confirm no credential, nonce or binder field is unbounded. **No field may be unbounded.** The responsible role is the project owner (interim) or a delegate, who must produce the measurements.
+
+## 15. Step 5f Owner Decisions (2026-10-25)
+- **API-DEC-004 Approved:** an unverified Google email returns `401 AUTH_GOOGLE_FAILED`, the same generic code as other Google failures. Updated references: the error-table row "Google identity with unverified email", §8.2 item 3, the §9 table, §10.1, §10.3 and §11.6. Traces: USER-FR-006, 069.
+- **API-DEC-012 stays Open.** The sign-in contract (`POST /auth/google`) is unchanged and takes no cart input. The evaluated preference (a separate post-sign-in Cart call) has no endpoint, identifier or payload defined, because Cart must first define guest-cart identification, ownership, merge triggering and merge behavior.
+- **Existing-subject email collision** (response is a normal sign-in; stored email unchanged; event without email) traces to USER-FR-088, USER-AC-042.
+- **Step 5g:** the clarified meaning of "identity conflict" and the two exceptions to `USER-SEC-017` (requirements §12.10) do not change any status code or body.

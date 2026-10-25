@@ -81,7 +81,7 @@ Guests MUST NOT be treated as authenticated customers in any category.
 | USER-FR-008 | A cancelled or failed Google authentication MUST result in no authenticated session and MUST leave the customer as a guest. |
 | USER-FR-009 | Repeated sign-ins by the same Google account MUST resolve to the same internal customer identity. |
 | USER-FR-010 | The service MUST NOT create duplicate customer identities for the same Google account. |
-| USER-FR-011 | Identity conflicts MUST be handled safely: the sign-in MUST be refused rather than automatically merged or guessed, and the conflict MUST be recorded for review. |
+| USER-FR-011 | Identity conflicts MUST be handled safely: the sign-in MUST be refused rather than automatically merged or guessed, and the conflict MUST be recorded for review. *(Clarified Step 5g, delegated; original wording kept above unchanged: an "identity conflict" here means a validated Google identity whose subject is unknown but whose email is held, case-insensitively, by another customer. An existing subject whose reported email collides is not refused; see USER-FR-088.)* |
 
 ### 4.2 Access Tokens, Refresh Tokens, and Logout
 | ID | Requirement |
@@ -180,7 +180,7 @@ Outcomes only; response formats and status codes are defined in the API contract
 | USER-FR-063 | Access token malformed | Protected operation is refused as unauthenticated. |
 | USER-FR-064 | Access token invalid or expired | Protected operation is refused as unauthenticated; expiry MAY be distinguishable so clients can renew using the refresh token. |
 | USER-FR-065 | Customer identity cannot be resolved | Access is refused; no fallback to another or guest identity; the event is logged without sensitive data. |
-| USER-FR-066 | Identity conflict | Sign-in is refused; no merge; recorded for review. |
+| USER-FR-066 | Identity conflict | Sign-in is refused; no merge; recorded for review. *(Clarified Step 5g, delegated; original kept: "identity conflict" means an unknown subject with an email held by another customer, per USER-FR-011. The existing-subject case follows USER-FR-088.)* |
 | USER-FR-067 | Access to a protected operation without authorization | Access is refused; no data about the requested resource is disclosed. |
 | USER-FR-068 | All of the above | Handled consistently, with no exposure of credentials, tokens, or internal details. |
 | USER-FR-069 | Google identity has an unverified email | Sign-in is refused per USER-FR-006; no customer created; no session; generic failure. |
@@ -220,7 +220,7 @@ Criteria whose detailed behavior belongs to another domain depend on that domain
 | USER-AC-010 | Authentication-related failures are handled consistently across all scenarios in §6. | FR-068 |
 | USER-AC-011 | A Google identity with an unverified email is rejected; no customer is created and no session is issued. | FR-006, 069; DEC-014 |
 | USER-AC-012 | An access token stops being accepted after the configured lifetime (15 minutes by default). | FR-026, 072; DEC-007 |
-| USER-AC-013 | An identity conflict results in a refused sign-in with no automatic merge, and the conflict is recorded. | FR-011, 066, 047 |
+| USER-AC-013 | An identity conflict results in a refused sign-in with no automatic merge, and the conflict is recorded. *(Clarified Step 5g, delegated; original kept: "identity conflict" has the meaning given in USER-FR-011; the existing-subject collision is covered by USER-AC-042.)* | FR-011, 066, 047 |
 | USER-AC-014 | Repeated failed or abusive authentication attempts are limited, and the limiting responses reveal no sensitive account information. Thresholds depend on the security design. | SEC-009; FR-078; DEC-013 |
 | USER-AC-015 | A valid, unexpired, unrevoked refresh token yields a new access token without Google sign-in. | FR-070; DEC-006 |
 | USER-AC-016 | An invalid, unknown, malformed, expired (past configured lifetime, 7 days by default), or revoked refresh token yields no access token. | FR-071, 076, 077 |
@@ -312,7 +312,7 @@ The project owner approved the security-design decisions below. This section rec
 | USER-SD-DEC-015 | Approved: sole CORS allowed origin `https://varsha-homemade.onrender.com`; no wildcard; credentials only if required | USER-SEC-003 | Revisit if custom domains are configured |
 | USER-SD-DEC-016 | Approved: `X-CSRF-Protection` header, `403 REQUEST_REJECTED`, Origin validation, missing `Origin` rejected on refresh and logout, session CSRF token | USER-SEC-007 | Design-level; no requirement text changed |
 | USER-SD-DEC-018 | Approved (approach): server-side environment secrets; startup validation; key identifiers and rotation; exposed Google client secret rotated before implementation | USER-SEC-003, 004 | Named owners still open |
-| USER-SD-DEC-001 | **Approved (conditional, in principle):** ID-token verification with a server-issued, single-use nonce, five-minute lifetime, page-held binder (decision 027) | USER-SEC-001; USER-FR-002, 007 | Documented in security-design §4.4; a replay-protection requirement is **proposed, not added** |
+| USER-SD-DEC-001 | **Approved (conditional, in principle):** ID-token verification with a server-issued, single-use nonce, five-minute lifetime, page-held binder (decision 027) | USER-SEC-001; USER-FR-002, 007 | Documented in security-design §4.4; the replay-protection requirement was added as USER-SEC-014 (§12.7) |
 | USER-SD-DEC-002 | **Approved (conditional):** HS256 if Express is the only application JWT issuer and verifier | USER-FR-026, 072; USER-SEC-002 | Consistent |
 | USER-SD-DEC-025 | Approved: Supabase hosts PostgreSQL only; Express authenticates; no Supabase Auth; no Data API dependence; authentication tables must not be exposed through Supabase's HTTP APIs | USER-SEC-011, 004 | Design-level; no requirement text changed |
 | USER-SD-DEC-026 | **Approved (conditional):** standard PostgreSQL driver; test connectivity first; dedicated least-privilege role separate from the database owner | USER-SEC-004 | Conditional on the connectivity test |
@@ -361,7 +361,7 @@ The project owner approved the security-design decisions below. This section rec
 | Inactivity window | The refresh-token lifetime; there is no separate inactivity timer |
 
 ### 12.6 Identity decisions recorded in Step 5c
-The owner approved case-insensitive email uniqueness (with no automatic merging), a unique (provider, subject) identity pair, a nullable name, required validated email, profile updates at each sign-in, and UUID identifiers. **No requirement text was changed.** They define the conflict cases of USER-FR-011 and USER-FR-066 (an email collision refuses sign-in and records the event) and are consistent with USER-FR-005, 046, 047 and USER-AC-013 and 023. Details are in data-model.md §15. One case remains open (an existing subject whose email now collides).
+The owner approved case-insensitive email uniqueness (with no automatic merging), a unique (provider, subject) identity pair, a nullable name, required validated email, profile updates at each sign-in, and UUID identifiers. **No requirement text was changed.** They define the conflict cases of USER-FR-011 and USER-FR-066 (an email collision refuses sign-in and records the event) and are consistent with USER-FR-005, 046, 047 and USER-AC-013 and 023. Details are in data-model.md §15. The existing-subject collision case was decided in Step 5d (sign-in succeeds, stored email kept, event recorded) and became USER-FR-088 in Step 5f.
 
 ### 12.7 Requirements added in Step 5d (approved under owner delegation, 2026-10-25)
 **No existing requirement text was changed.** The owner may override these.
@@ -374,7 +374,7 @@ The owner approved case-insensitive email uniqueness (with no automatic merging)
 
 | ID | Acceptance criterion | Traces to |
 |---|---|---|
-| USER-AC-031 | A nonce presented a second time is rejected and creates no session. | USER-SEC-014 |
+| USER-AC-031 | A nonce presented a second time is rejected, creates no session, and a **durable security event** (`AUTH_NONCE_REPLAY`, or `AUTH_NONCE_INVALID` for an unknown or expired nonce) is recorded without the credential, nonce or binder. *(Amended Step 5e; original wording: "A nonce presented a second time is rejected and creates no session.")* | USER-SEC-014 |
 | USER-AC-032 | An expired nonce is rejected. | USER-SEC-014; USER-FR-087 |
 | USER-AC-033 | Two simultaneous requests carrying the same nonce produce at most one success. | USER-SEC-014 |
 | USER-AC-034 | A refresh or logout failing the Origin, header or token check is rejected with 403 `REQUEST_REJECTED` and the refresh token is neither consumed nor revoked. | USER-SEC-015 |
@@ -385,3 +385,38 @@ The owner approved case-insensitive email uniqueness (with no automatic merging)
 | USER-AC-039 | Nonce issuance is rate-limited. | USER-FR-087; USER-SEC-009 |
 
 **Verification.** Acceptance criteria are verified through a written acceptance-verification checklist run against a test environment (no unit tests). Creating that checklist as a documentation file is a proposed next step.
+
+### 12.8 Step 5e notes (2026-10-25)
+- **USER-AC-031 amended** (existing ID, original wording preserved in it) so that nonce replay produces a durable security event.
+- **Superseded in Step 5f (§12.9):** the proposed IDs below were approved and added, and an email-uniqueness requirement was added. Original note follows.
+- **Not added, awaiting your approval of the proposed IDs (see decisions/0001-authentication-architecture-decisions.md §9):** a requirement for atomic persistence and fail-closed behavior of mandatory security events, and a requirement for the client-IP logging policy. Both need new IDs.
+- **Not added by instruction:** an email-uniqueness requirement. The existing requirements (USER-FR-005, 009, 010, 011, 046, 047, 066; USER-AC-013, 023) were checked against the approved collision policy and are consistent with it. The database constraints **cannot be checked**, because no physical design exists.
+
+### 12.9 Owner decisions recorded in Step 5f (2026-10-25)
+**No existing requirement or acceptance-criterion text was changed.** Numbers `USER-FR-088` and `USER-AC-042` are the next free numbers; they were assigned by the specification author, not by the owner.
+| ID | Requirement | Status |
+|---|---|---|
+| USER-SEC-017 | A mandatory security event MUST be persisted in the same database transaction as the state change it describes. If it cannot be persisted, the operation MUST fail (fail closed). Detection of event-persistence failures MUST NOT depend solely on the database whose write failed. **Exceptions (Step 5g, delegated, reversible):** (1) a session revocation caused by detected refresh-token reuse MUST NOT be skipped because its event cannot be stored; (2) a sign-in by an existing subject with a colliding email MUST NOT be refused because the conflict event cannot be stored. In both cases the failure MUST be detected through an operational log entry and a monitored indicator that do not depend on the failing database. *(Original wording, approved Step 5f: the first three sentences above without the exceptions.)* | **Approved** (owner, Step 5f); exceptions **Approved (delegated)** |
+| USER-SEC-018 | Client IP addresses MUST NOT be written to operational logs by default. They MAY be recorded only for a documented security need that states the purpose, who may read them, how long they are kept, and the privacy implications. | **Approved** (owner, Step 5f) |
+| USER-FR-088 | Customer email addresses MUST be unique case-insensitively as a data-integrity rule. Email MUST NOT be used to identify, look up or merge customers; identity remains the Google provider and subject. If a signing-in customer's identified subject already exists and Google reports an email held by another customer, sign-in MUST succeed, the stored email MUST remain unchanged, and the conflict MUST be recorded without unnecessary personal data. If the subject is unknown and the email is held by another customer, sign-in MUST be refused (`409 AUTH_IDENTITY_CONFLICT`) and nothing merged. | **Approved** (owner, Step 5f) |
+
+| ID | Acceptance criterion | Traces to |
+|---|---|---|
+| USER-AC-040 | A mandatory event is stored in the same transaction as its state change; when the event cannot be stored, the state change does not occur and the operation fails. A failed event write is detectable through a signal that does not depend only on the failing database. *(Amended Step 5g, delegated; original kept: except for the two exceptions in USER-SEC-017, where the revocation or the sign-in still occurs and the failed event write is detected through that independent signal.)* | USER-SEC-017; USER-FR-082 |
+| USER-AC-041 | Client IP addresses do not appear in operational logs by default; any exception documents purpose, readers, retention and privacy implications. | USER-SEC-018 |
+| USER-AC-042 | Emails differing only in letter case are treated as the same address for uniqueness. Email is never used to find or merge a customer. For an existing subject whose reported email is held by another customer, sign-in succeeds, the stored email is unchanged, and the recorded conflict event carries no email address. | USER-FR-088; USER-FR-005, 011, 047, 066; USER-AC-013, 023 |
+
+**Not the same as** `USER-SD-AC-040` and `USER-SD-AC-041` (security-design §17), which are different criteria.
+
+**Limitation preserved:** a legitimate new owner of a reassigned address that another customer holds cannot sign in, and the first release has no self-service recovery (data-model §15.4; support procedure gate `USER-SD-AC-045`).
+
+**Verification.** `USER-AC-042` depends on a database constraint that does not yet exist; it cannot be verified until the physical design and a test environment exist.
+
+### 12.10 Step 5g decisions (2026-10-25, approved under owner delegation, reversible)
+| Question | Decision | Reason |
+|---|---|---|
+| Reuse detected but the event cannot be stored | The session is **still revoked**; the failure is detected through an independent operational signal. Exception 1 to USER-SEC-017. | Failing closed here would keep a possibly stolen session alive |
+| Existing subject with a colliding email, event cannot be stored | Sign-in **succeeds**; the failure is detected as above. Exception 2 to USER-SEC-017. | A customer must not be locked out of their own account because an audit write failed; the event describes a collision, not a state change |
+| Meaning of "identity conflict" in USER-FR-011, 066 and USER-AC-013 | Clarified, original text kept (above) | Removes the contradiction with USER-FR-088 |
+| Existing-subject event type | The existing event `AUTH_IDENTITY_CONFLICT` with a distinct reason code; the code's name is fixed at physical design | No new event type is needed |
+All other mandatory events stay atomic and fail closed. The owner may override any of these.

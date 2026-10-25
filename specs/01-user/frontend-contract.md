@@ -104,6 +104,9 @@ Under Profile X the refresh cookie is a third-party cookie. A browser that block
 | FE-AC-008 | No secret appears in the frontend code or its configuration. | §13 |
 | FE-AC-009 | If cross-tab coordination is approved, two tabs never send overlapping refresh requests in the same browser. | §8 (conditional) |
 
+## 14.1 Traceability to requirements (added Step 5f)
+This contract implements `USER-SEC-014` to `016` (nonce, binder, CSRF), `USER-FR-087` (nonce endpoint) and acceptance criteria `USER-AC-031` to `039` (requirements §12.7). It adds no requirement.
+
 ## 15. Open items and questions
 1. Require cross-tab coordination (§8), or accept the risk?
 2. May the page skip silent refresh after a known cookie failure (§12)?

@@ -95,6 +95,8 @@ Dependencies may be identified during specification, but the implementation sequ
 | [01-user/data-model.md](01-user/data-model.md) | Logical data model |
 | [01-user/security-design.md](01-user/security-design.md) | Security decisions and register |
 | [01-user/frontend-contract.md](01-user/frontend-contract.md) | Browser authentication behavior |
+| [01-user/physical-design.md](01-user/physical-design.md) | Physical database design (DRAFT, not approved) |
+| [01-user/infrastructure-verification-runbook.md](01-user/infrastructure-verification-runbook.md) | Read-only checks for the owner (draft, none performed) |
 
 ### Decision records
 | Record | Purpose |

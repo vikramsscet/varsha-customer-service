@@ -17,7 +17,7 @@ Keywords follow the requirements: MUST / SHOULD / MAY.
 
 ## 1. Status and Scope
 
-**In scope:** the logical PostgreSQL data needed by the User & Authentication domain: customer identity, refresh-token/session records, and security-event recording.
+**In scope:** the logical PostgreSQL data needed by the User & Authentication domain: customer identity, refresh-token/session records, sign-in nonce records, and security-event recording.
 
 **Out of scope:**
 - Guest-cart persistence, guest-cart identifiers, and merge (Cart domain; USER-Q-006). No guest-cart tables are defined here.
@@ -31,7 +31,7 @@ Keywords follow the requirements: MUST / SHOULD / MAY.
 | Source | Used for |
 |---|---|
 | [requirements.md](requirements.md) | Identity, token, privacy, and security requirements (USER-FR, USER-SEC, USER-AC, USER-DEC, USER-Q). |
-| [api-contracts.md](api-contracts.md) | The four endpoints the model must support and the proposed customer response (`id`, `name`, `email`). |
+| [api-contracts.md](api-contracts.md) | The five endpoints the model must support (including the nonce endpoint) and the proposed customer response (`id`, `name`, `email`). |
 | [../README.md](../README.md) | SDD rules. This data model follows rules 3 and 12 (reviewed models; distinguish confirmed from proposed). |
 
 `specs/shared/` and `specs/decisions/` contain no conventions or decision records yet, so none are applied. Naming and type conventions below are therefore proposals.
@@ -46,12 +46,13 @@ Section 10 holds the full traceability matrix.
 | **Refresh Session** | One authenticated login lifetime for a customer; the unit of revocation. | **[Proposed]** structure; the need for revocable refresh state is **[Required]** (USER-FR-073, 075, SEC-011) |
 | **Refresh Token** | One issued refresh credential within a session (stored only in non-reusable form). | **[Proposed]** structure; need is **[Required]** |
 | **Security Event** | Record of security-relevant occurrences for review. | **[Proposed]** structure; the need to record is **[Required]** (USER-FR-011, 065, 066, 082) |
+| **Sign-in Nonce** | One short-lived, single-use server-issued nonce for a Google sign-in attempt (§14.1). | **[Approved in principle]** (USER-SD-DEC-001; USER-DM-DEC-014); need **[Required]** (USER-SEC-014, USER-FR-087) |
 
 **[Proposed]** Customer, Refresh Session, and Refresh Token are kept as separate logical entities. A session is the unit of revocation and can hold one or more token records. A **token chain is not mandatory**: it exists only if rotation is approved (USER-FR-080, **[Unresolved]** under USER-Q-001). If rotation is not approved, a session may hold a single token record, or the two entities may be merged at physical design, without affecting the Customer entity or the API. The separation does not prejudice the approved refresh-token security requirements (section 5.3).
 
 **[Proposed]** The logical Refresh Token entity describes the behavior and state needed to manage refresh credentials; it does not mandate a separate physical table. The final physical representation must support all approved refresh-token security requirements. Fields such as consumption state and successor relationships apply only where required by the approved strategy. Any simplification or merging of entities must preserve revocation, expiry, concurrency safety, invalidated-token event recording, and token-store disclosure protection.
 
-No other entities are proposed. Considered and excluded: a login-history table, a profile table, a role table, and a provider-link table (none is justified by the approved requirements; USER-DEC-009 defers account linking).
+No entities beyond these five are proposed. Considered and excluded: a login-history table, a profile table, a role table, and a provider-link table (none is justified by the approved requirements; USER-DEC-009 defers account linking).
 
 ## 4. Customer Entity
 
@@ -80,7 +81,7 @@ Shipping addresses and phone numbers needed for delivery belong to Checkout/Deli
 | Email is unique **case-insensitively** as a data-integrity rule, **not** as an identity key; no automatic account merging | **[Approved]** (Step 5c; USER-DM-DEC-002; implications in §15.4) |
 
 ### 4.3 Email and name changes
-- **[Required]** A change in Google name or email MUST NOT create a new customer (USER-FR-046). Identity is the Google account identifier.
+- **[Required]** A change in Google name or email MUST NOT create a new customer (USER-FR-046). Identity is the Google account identifier (the approved meaning is the pair provider and subject; see §15).
 - **[Proposed]** On a later successful sign-in, the stored name and email are updated from the *validated* Google identity information, and the updated timestamp is set. This keeps the profile current without changing identity. Updates are applied only from validated, email-verified identity data (USER-FR-002, 006).
 - **[Unresolved]** Whether the customer's email should be updated automatically, or kept as-is until explicit confirmation, has privacy and Order-history implications (an Order may need the email at purchase time). Order domain should snapshot what it needs rather than rely on this field. USER-DM-DEC-003.
 
@@ -185,7 +186,7 @@ Records occurrences that the requirements say must be recorded or reviewed.
 | Field (logical) | Meaning | Nullability | Label |
 |---|---|---|---|
 | Event identifier | Unique identifier. | Required | **[Proposed]** |
-| Event type | Categorical type (for example: refresh-token reuse of an invalidated token, identity conflict, unresolvable identity). The full list is **[Unresolved]**. | Required | **[Required]** need (USER-FR-011, 065, 066, 082) |
+| Event type | Categorical type (for example: refresh-token reuse of an invalidated token, identity conflict, unresolvable identity). The full list was **[Unresolved]** here and is superseded by security-design §13.4 (Step 5d). | Required | **[Required]** need (USER-FR-011, 065, 066, 082) |
 | Occurred timestamp | When it occurred. | Required | **[Proposed]** |
 | Customer | Related customer, if known. | Nullable | **[Proposed]** |
 | Session / token record | Related session or token record identifier, if known. | Nullable | **[Proposed]** |
@@ -266,16 +267,18 @@ Conceptual approaches (not selected):
 ### 8.4 Retention (all unresolved)
 No retention periods are set in this document. Nothing is deleted by the model.
 
+The consolidated retention table, with every period marked OPEN, is in security-design §13.3.
+
 | Topic | Status |
 |---|---|
 | Customer account deletion | **[Unresolved]**; deferred by USER-DEC-011. Privacy obligations must still be reviewed before production (USER-PRE-001). |
 | Personal-data retention (name, email) | **[Unresolved]** (USER-PRE-001). |
 | Order-related retention obligations | **[Unresolved]**; Order history may need customer data to persist, so customer data MUST NOT be deleted on the assumption it is unneeded. Depends on the Order specification. |
 | Authentication-session retention (expired/revoked sessions and tokens) | **[Unresolved]** — USER-DM-DEC-007. Note: retaining consumed token records is what lets reuse be recognized as reuse; removing them earlier would reject the token as unknown but could not identify it as a reuse event. |
-| Security-event retention | **[Unresolved]** — USER-DM-DEC-007. |
-| Security-event references, referential actions, anonymization or removal | **[Unresolved]** — USER-DM-DEC-012, pending the privacy and retention review. |
+| Security-event retention | **[Unresolved]**; 180 days is a **proposed operational default, provisional, pending privacy and legal review** (Step 5f); USER-DM-DEC-007. |
+| Security-event references, referential actions, anonymization or removal | References: plain nullable identifiers, no foreign keys (Step 5f, conditional). Anonymization or removal **[Unresolved]** — USER-DM-DEC-012. |
 
-**Event retention is independent of token retention.** Retaining a security event MUST NOT require retaining the corresponding session or token record indefinitely, and removing a session or token record MUST NOT force removal of a security event that is still within its retention need. No retention periods are proposed. **[Required for the proposal to be acceptable]** Security events continue to exclude raw tokens, token verifiers, credentials, secrets, and unnecessary personal data. **[Required]** (USER-FR-028, USER-SEC-008)
+**Event retention is independent of token retention.** Retaining a security event MUST NOT require retaining the corresponding session or token record indefinitely, and removing a session or token record MUST NOT force removal of a security event that is still within its retention need. No retention period is approved; 180 days for security events is a provisional proposal (Step 5f). **[Required for the proposal to be acceptable]** Security events continue to exclude raw tokens, token verifiers, credentials, secrets, and unnecessary personal data. **[Required]** (USER-FR-028, USER-SEC-008)
 
 **Retention and recognition limitation:** The requirement to record presentation of an invalidated token must be implemented within the capabilities of the approved token strategy and retention policy. If the records or other information needed to recognize a previously invalidated token are removed, the system may be unable to distinguish that token from an unknown token. The security design and retention decision must explicitly address this limitation and ensure that the approved security requirements are not silently weakened. No retention period or recognition window is selected by this document.
 
@@ -337,7 +340,7 @@ Status as of Step 5b: decisions resolved by the security design are recorded in 
 | USER-DM-DEC-012 | Security-event references (enforced links vs. recorded identifiers), referential actions, and anonymization or removal strategy. | None selected; event retention must not force indefinite token-record retention. | USER-PRE-001; USER-DM-DEC-007 |
 | USER-DM-DEC-013 | Whether rotation is approved, and, if not, which non-rotating strategy satisfies USER-FR-081–083. Session-level revocation on reuse and absolute session lifetime (DEC-005) remain with it. | None selected. | USER-Q-001 |
 
-USER-DM-DEC-002 stays open: email uniqueness and the exact identity-conflict scenarios are unresolved until API-DEC-013 is settled. No automatic account merging by email is introduced (USER-FR-047).
+*(Superseded Step 5c to 5f: USER-DM-DEC-002 is Approved, §15.1; the conflict scenarios are in §15.4 and requirements §12.9.)* Original: USER-DM-DEC-002 stays open: email uniqueness and the exact identity-conflict scenarios are unresolved until API-DEC-013 is settled. No automatic account merging by email is introduced (USER-FR-047).
 
 **Carried-over unresolved items (not decided here):** rotation confirmation, reuse response, session-level revocation, concurrency mechanism and retry tolerance, lost-response recovery (USER-Q-001); multiple concurrent sessions and logout-from-all-devices (USER-Q-003); rate-limit state (USER-Q-002); guest-cart mechanism (USER-Q-006); pre-launch privacy review (USER-PRE-001).
 
@@ -390,7 +393,7 @@ The project owner approved security-design decisions that resolve some items abo
 | USER-DM-DEC-005 | **Resolved in part.** The absolute session lifetime is **90 days** (USER-SD-DEC-010, approved). The absolute session expiry is therefore a required attribute of every session. Still open: whether it is stored at creation or computed from configuration (proposal: store at creation). |
 | USER-DM-DEC-006 | **Resolved in part.** Mandatory security events are persisted and operational logs are redacted (USER-SD-DEC-019). Still open: the full event list and operational details. |
 | USER-DM-DEC-007 | **Open.** Retention (USER-SD-DEC-020). |
-| USER-DM-DEC-012 | **Open.** Event references and anonymization wait for the retention review. |
+| USER-DM-DEC-012 | **Approved (conditional), Step 5f:** plain nullable identifiers, no enforced foreign keys; anonymization or removal waits for the retention review. (Original: Open.) |
 | USER-DM-DEC-013 | **Resolved in part.** Rotation is approved (USER-SD-DEC-004) and reuse revokes the whole session (USER-SD-DEC-008). The non-rotating alternative is no longer needed. Absolute session lifetime remains with DEC-005. |
 | USER-DM-DEC-001, 002, 003, 008, 009, 010, 011 | **Open**, unchanged. |
 
@@ -399,7 +402,7 @@ The project owner approved security-design decisions that resolve some items abo
 - **Consumed state** is recorded durably so a consumed token is never reusable; consumption and successor creation happen in the **same transaction**, and an ambiguous outcome is never treated as a confirmed rollback (USER-SD-DEC-007). The exact transaction boundaries are decided at physical design.
 - **Token verifier** is a stored one-way digest of the token; the raw token is never stored. This settles the earlier open question about whether a dedicated stored field exists. Its uniqueness and index remain **Proposed** for physical design.
 - **Session revocation on reuse** is approved: the Refresh Session carries the revocation, and "reuse detected" is an approved revocation reason. The full set of reasons stays open.
-- **Security Event** is approved as a persistent record for the mandatory events; event types beyond the mandatory three remain open.
+- **Security Event** is approved as a persistent record for the mandatory events; *(Superseded: the event types are in security-design §13.4.)* Original: event types beyond the mandatory three remain open.
 - **Multiple sessions** per customer are allowed; no logout-all (USER-SD-DEC-011).
 
 ### 13.3 Acceptance criteria status
@@ -440,7 +443,7 @@ The revised row for the Refresh Session's *Absolute session expiry* in §5.1 (pr
 
 The nonce is unique, is not tied to a customer (the caller is unauthenticated), and is removed under a short retention rule. An optional binding to the requesting browser is open. **No physical schema is decided.** If the nonce is not adopted, nothing is added.
 
-**Retention requirements for review (USER-SD-DEC-020, open; detail in security-design §13.3).** No periods are proposed.
+**Retention requirements for review (USER-SD-DEC-020, open; detail in security-design §13.3).** No period is approved (180 days for security events is a provisional proposal, Step 5f).
 - *Sessions:* active sessions are needed to authorize refresh; revoked and expired session records are needed to reject their tokens and attribute events.
 - *Consumed refresh-token records:* needed at least until the token's own expiry to recognize a presented token as previously consumed. If a consumed record is deleted earlier, the token looks unknown, is still rejected, but cannot be recognized as reuse, so no reuse event is recorded and the session is not revoked on that basis.
 - *Security events:* kept independently of token records (USER-DM-AC-019).
@@ -466,7 +469,7 @@ Relationships: none to a customer or session. Lifecycle: expired and consumed ro
 The Refresh Session carries a one-way digest of its session-scoped CSRF token (§5.1). It is created at sign-in, constant for the session, never logged, and discarded with the session. **Why:** the token must be checked against the session on refresh and logout without storing the raw value.
 
 ### 14.3 Security events
-Mandatory event types are unchanged (invalidated refresh-token presentation, identity conflict, unresolvable identity). **Proposed addition:** nonce replay or invalid nonce, recorded without the credential, the nonce or the binder. The full list remains open (USER-DM-DEC-006).
+**Event types follow security-design §13.4.** Mandatory and durable: refresh-token reuse and session revocation, identity conflict, unresolvable identity, **nonce replay and invalid nonce** (`AUTH_NONCE_REPLAY`, `AUTH_NONCE_INVALID`), and the audit events for successful sign-in, refresh-token rotation, session revocation and logout, each atomic with its state change. Failed sign-in and rate-limit rejection are **operational logs and metrics only**, so they cannot cause unbounded database writes. Events never contain the credential, the nonce, the binder, tokens or digests. The nonce-replay event was previously labelled "proposed"; that label is superseded (USER-DM-DEC-006).
 
 ### 14.4 Database access controls (logical requirement)
 - The authentication tables must not be reachable through Supabase's HTTP APIs, and nothing is granted on them to the roles those APIs use.
@@ -503,10 +506,10 @@ Owner decisions recorded here use the repository IDs. **No physical schema, DDL 
 | Identity pair | The pair (identity provider, provider subject) is unique; the Google subject is the stable external identity; email is never the primary identity key and accounts are never merged by email | **Approved** |
 | USER-DM-DEC-001, 010 | Customer name is nullable; stored as NULL when Google provides no usable name; returned as `"name": null`; no placeholder | **Approved** |
 | USER-DM-DEC-011 | Email is required and validated (Google ID token and verified-email claim) before storage | **Approved** |
-| USER-DM-DEC-002 | Email is unique **case-insensitively**, with no automatic account merging | **Approved** (implications in §15.4; one case open) |
+| USER-DM-DEC-002 | Email is unique **case-insensitively**, with no automatic account merging | **Approved** (implications in §15.4; the existing-subject case was decided in Step 5d, §15.4) |
 | USER-DM-DEC-003 | The current profile (name, email) is updated at each successful sign-in from validated Google claims; historical orders keep a snapshot | **Approved** |
 | USER-DM-DEC-005 (remainder) | The absolute session expiry is stored at session creation | **Approved** |
-| USER-DM-DEC-012 | Security events use stable identifiers without foreign keys | **Approved (conditional)**: only if the retention design (USER-SD-DEC-020, open) supports it |
+| USER-DM-DEC-012 | Security events use stable identifiers without foreign keys | **Approved (conditional)**; Step 5f: owner prefers plain nullable identifiers; remains provisional until the retention review (USER-SD-DEC-020, open) |
 | USER-DM-DEC-006 | Mandatory events are persisted and critical state changes are atomic with their required events | Principle **Approved**; the enumeration is **Proposed** (security-design §13.4) |
 
 ### 15.2 Identity
@@ -561,3 +564,41 @@ The absolute session expiry (creation + 90 days) is stored when the session is c
 
 ### 15.11 Still open
 The retention design (which also decides the no-foreign-key choice); the content of the support procedure for a locked-out address owner (a production gate); the exact event list for failed sign-in and rate-limit rejection (decided as operational logs; see security-design §13.4).
+
+## 16. Traceability and Consistency Check (Step 5e, 2026-10-25)
+### 16.1 Traceability
+| Data element | Requirements | Acceptance criteria | Decisions |
+|---|---|---|---|
+| Sign-in Nonce (§14.1) | USER-FR-087, USER-SEC-014, USER-SEC-009 | USER-AC-031, 032, 033, 039; USER-DM-AC-028, 029, 032 | USER-SD-DEC-001, 027; USER-DM-DEC-014 |
+| Session CSRF-token digest (§14.2) | USER-SEC-015 | USER-AC-034, 036; USER-DM-AC-030 | USER-SD-DEC-028; USER-DM-DEC-015 |
+| Table exposure and roles (§14.4) | USER-SEC-016 | USER-AC-037, 038; USER-DM-AC-031 | USER-SD-DEC-025, 026 |
+| Identity pair, email, name (§15) | USER-FR-005, 009 to 011, 046, 047, 066 | USER-AC-013, 023; USER-DM-AC-033 to 035, 039 | USER-DM-DEC-001, 002, 003, 010, 011 |
+| Events and atomicity (§14.3, §15.8) | USER-FR-011, 065, 066, 082 | USER-DM-AC-018, 019, 038 | USER-DM-DEC-006, 012; USER-SD-DEC-019, 024 |
+
+### 16.2 Consistency check before any physical detail is finalized
+| Topic | Result | Open |
+|---|---|---|
+| Nonce lifecycle | **Consistent** across security-design §4.4, api-contracts §11.1–11.2, this model §14.1, frontend-contract §2, USER-FR-087 and USER-SEC-014: five minutes, digest, one atomic conditional consumption, replay rejected and recorded | The digest algorithm and the binder-hash encoding are not fixed; opportunistic cleanup of expired rows is described but not designed |
+| Event retention and foreign keys | **Consistent but not final:** events use plain identifiers (USER-DM-DEC-012, conditional on the retention decision); nothing in the model requires a session or token row to outlive its events | Retention periods (USER-SD-DEC-020) are OPEN and may change the foreign-key decision |
+| Session relationships | **Consistent:** one customer, many sessions; one session, many token records; absolute expiry stored at creation; no customer removal in the first release; restrictive referential actions | Revocation-reason and event-type enumerations are not final |
+| Email constraint | The logical constraint (case-insensitive unique, never an identity key) is consistent with the API contract (§12.3) and requirements | **UNVERIFIED** against a physical constraint: no physical design exists |
+
+## 17. Step 5f Owner Decisions (2026-10-25)
+Specification only; no schema, DDL or migration is created.
+- **Event references:** an event holds customer, session and token-record references as plain nullable identifiers, not enforced foreign keys, so event lifetime is independent of those records (USER-DM-DEC-012; `USER-DM-AC-019`).
+- **Session and token cleanup** is separate from event retention. A consumed token record is kept at least until the token's own expiry; no other period or timing is approved (security-design §13.3).
+- **Event retention:** 180 days is a proposed operational default pending privacy and legal review; provisional.
+- **Email:** `USER-FR-088` and `USER-AC-042` (requirements §12.9) record case-insensitive uniqueness. The mechanism (for example how comparison is made and how a unique violation inside a transaction is handled for the existing-subject collision) is a **physical-design question and is not decided here**. The conflict event records no email address. The reassigned-address limitation and the absence of self-service recovery stand (§15.4).
+| Data element | Requirements | Acceptance criteria |
+|---|---|---|
+| Customer email uniqueness (§5.1, §15.4) | USER-FR-088 | USER-AC-042 |
+| Security event (atomic write, no client IP) | USER-SEC-017, 018 | USER-AC-040, 041 |
+
+## 18. Step 5g: Precedence, Collision Handling and Traceability (2026-10-25)
+**Precedence.** This document is built by appending. Where an earlier section differs from a later one, the **later section governs**: §13 over §1 to §12, §14 over §13, §15 over §11 to §14, §17 and this section over all. Stale statements in earlier sections (for example the open items in §5.4, §6.1, §6.2 and §11) are historical.
+**Existing-subject email collision (USER-FR-088; USER-AC-042).** Sign-in succeeds, the stored email is unchanged, and a conflict event is recorded with the existing `AUTH_IDENTITY_CONFLICT` type and a distinct reason code, **never the email address** (security-design §13.4). If the event cannot be stored, the sign-in still succeeds and the failure is detected independently (requirements §12.10, Exception 2). How the unique violation is avoided or absorbed inside the sign-in transaction is a **physical-design decision, not made here**.
+| Data element | Requirements | Acceptance criteria |
+|---|---|---|
+| Email uniqueness, collision handling (§4.2, §15.4) | USER-FR-088, 005, 011, 047 | USER-AC-042; USER-DM-AC-034, 039 |
+| Event atomicity and exceptions (§15.8) | USER-SEC-017 | USER-AC-040; USER-DM-AC-038 |
+| No client IP in logs (§15.8) | USER-SEC-018 | USER-AC-041 |
